@@ -1,0 +1,89 @@
+{
+  "collections": {
+    "weeks": {
+      "documentId": "week_id",
+      "description": "Stores the training schedule, exercises, and set logs for each training week.",
+      "fields": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier of the week (e.g., 'woche_1')"
+        },
+        "name": {
+          "type": "string",
+          "description": "Human-readable week name (e.g., 'Woche 1')"
+        },
+        "phase": {
+          "type": "string",
+          "description": "The current goal/phase (e.g., 'Lean Bulk')"
+        },
+        "days": {
+          "type": "array",
+          "description": "An array of 7 DayData elements containing exercise and daily metrics.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "name": { "type": "string" },
+              "workoutName": { "type": "string" },
+              "weight": { "type": "number", "nullable": true },
+              "calories": { "type": "number", "nullable": true },
+              "steps": { "type": "number", "nullable": true },
+              "cardio": { "type": "string" },
+              "cardioKal": { "type": "number", "nullable": true },
+              "exercises": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "string" },
+                    "name": { "type": "string" },
+                    "sets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": { "type": "string" },
+                          "weight": { "type": "number", "nullable": true },
+                          "reps": { "type": "number", "nullable": true },
+                          "completed": { "type": "boolean" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "nutrition": {
+      "documentId": "plan",
+      "description": "Stores the entire nutrition meal plan array and current carbohydrate scaling percentage.",
+      "fields": {
+        "foods": {
+          "type": "array",
+          "description": "List of all meal items (Breakfast, Pre/Post workout, dinner, snacks) with nutrient info.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "meal": { "type": "string" },
+              "food": { "type": "string" },
+              "amount": { "type": "number" },
+              "calories": { "type": "number" },
+              "protein": { "type": "number" },
+              "carbs": { "type": "number" },
+              "fat": { "type": "number" },
+              "isEaten": { "type": "boolean", "optional": true }
+            }
+          }
+        },
+        "scale": {
+          "type": "number",
+          "description": "Carbohydrate scaling percentage factor (e.g. 100)"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Gym Progression",
+  "description": "Ein moderner, intuitiver und einfacher Fitness-Tracker zur Erfassung von Gewicht, Kalorien, Schritten, Cardio und Trainingsfortschritten.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
