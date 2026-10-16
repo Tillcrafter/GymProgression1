@@ -1,448 +1,846 @@
-import React, { useState, useEffect } from "react";
-import { WeekData } from "./types";
-import { getInitialWeek } from "./initialData";
-import Dashboard from "./components/Dashboard";
-import DayFocusView from "./components/DayFocusView";
-import AnalyticsView from "./components/AnalyticsView";
-import DataManagement from "./components/DataManagement";
-import NutritionView from "./components/NutritionView";
+import React, { useState, useEffect, useRef } from "react";
+import { WeekPlan, DayPlan } from "./types";
 import { 
-  Dumbbell, Timer, TrendingUp, Settings, 
-  Calendar, Sun, Moon, Apple, Cloud, CloudOff, Loader2, AlertTriangle
+  getInitialWeek, 
+  createNewWeekPlan, 
+  normalizeWeekPlan, 
+  getTodayDayId, 
+  getCurrentWeekDates,
+  sanitizeForFirestore,
+  getBrustRueckenGymRows,
+  getArmeSchulternGymRows,
+  getRestdayGymRows,
+  getRestdayCardioRows,
+  getTrainingDayCardioRows
+} from "./initialData";
+import GymExcelTable from "./components/GymExcelTable";
+import CardioExcelTable from "./components/CardioExcelTable";
+import NutritionExcelTable from "./components/NutritionExcelTable";
+import WeightExcelTable from "./components/WeightExcelTable";
+import { SettingsModal, WorkoutPresetType } from "./components/SettingsModal";
+import { 
+  Cloud, 
+  Loader2, 
+  Plus, 
+  CheckCircle2, 
+  Table,
+  Dumbbell,
+  Activity,
+  Utensils,
+  Scale,
+  LayoutGrid,
+  RotateCcw,
+  Sparkles,
+  Info,
+  Calendar,
+  AlertTriangle,
+  RefreshCw,
+  Download,
+  Settings
 } from "lucide-react";
-import { collection, getDocs, setDoc, doc, deleteDoc } from "firebase/firestore";
+import { collection, getDocs, setDoc, doc } from "firebase/firestore";
 import { db } from "./lib/firebase";
 
 export default function App() {
-  // Theme state
-  const [darkMode, setDarkMode] = useState<boolean>(() => {
-    const saved = localStorage.getItem("gym_progression_theme");
-    return saved ? saved === "dark" : true; // Default to dark mode for rich aesthetics
-  });
+  const todayDayId = getTodayDayId();
+  const weekDates = getCurrentWeekDates();
 
-  // 1. Core weekly training state
-  const [weeks, setWeeks] = useState<WeekData[]>([]);
+  const [weeks, setWeeks] = useState<WeekPlan[]>([]);
   const [selectedWeekId, setSelectedWeekId] = useState<string>("woche_1");
-  const [syncStatus, setSyncStatus] = useState<"loading" | "saved" | "saving" | "error">("loading");
-  const [syncErrorMsg, setSyncErrorMsg] = useState<string | null>(null);
+  const [activeDayId, setActiveDayId] = useState<string>(todayDayId);
+  const [activeTab, setActiveTab] = useState<"gym" | "cardio" | "nutrition" | "weight" | "all">("gym");
+  
+  // Cloud Sync state
+  const [syncStatus, setSyncStatus] = useState<"loading" | "saved" | "saving" | "local" | "error">("loading");
+  const [lastSyncTime, setLastSyncTime] = useState<string>("");
+  const [syncErrorMessage, setSyncErrorMessage] = useState<string>("");
+  const [showSyncModal, setShowSyncModal] = useState<boolean>(false);
+  const [showSettingsModal, setShowSettingsModal] = useState<boolean>(false);
 
-  const [activeTab, setActiveTab] = useState<"nutrition" | "focus" | "analytics" | "data">("focus");
-  const [activeDayId, setActiveDayId] = useState<string>("montag");
+  const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Load weeks from Firestore on mount
+  // 1. Initial Load from LocalStorage & Firestore
   useEffect(() => {
-    async function loadWeeks() {
+    async function initData() {
+      setSyncStatus("loading");
+      let localDataLoaded = false;
+
+      // Check LocalStorage v5 for instant 0ms render
+      const cached = localStorage.getItem("fittracker_excel_plans_v5");
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            const normalized = parsed.map((w: any) => normalizeWeekPlan(w));
+            setWeeks(normalized);
+            setSelectedWeekId(normalized[0].id);
+            setActiveDayId(todayDayId);
+            localDataLoaded = true;
+          }
+        } catch (e) {
+          console.warn("Local storage parse error:", e);
+        }
+      }
+
+      if (!localDataLoaded) {
+        const defaultWeek = getInitialWeek();
+        setWeeks([defaultWeek]);
+        setSelectedWeekId(defaultWeek.id);
+        setActiveDayId(todayDayId);
+        localStorage.setItem("fittracker_excel_plans_v5", JSON.stringify([defaultWeek]));
+      }
+
+      // Connect to Firestore
       try {
-        setSyncStatus("loading");
-        setSyncErrorMsg(null);
         const querySnapshot = await getDocs(collection(db, "weeks"));
-        const loadedWeeks: WeekData[] = [];
-        
-        querySnapshot.forEach((doc) => {
-          loadedWeeks.push(doc.data() as WeekData);
+        const cloudWeeks: WeekPlan[] = [];
+        querySnapshot.forEach((d) => {
+          const raw = d.data();
+          if (raw && (raw.days || raw.id)) {
+            cloudWeeks.push(normalizeWeekPlan({ ...raw, id: raw.id || d.id }));
+          }
         });
 
-        if (loadedWeeks.length > 0) {
-          // Sort weeks numerically to maintain exact chronologic order
-          loadedWeeks.sort((a, b) => {
+        if (cloudWeeks.length > 0) {
+          cloudWeeks.sort((a, b) => {
             const numA = parseInt(a.id.replace(/\D/g, ""), 10) || 0;
             const numB = parseInt(b.id.replace(/\D/g, ""), 10) || 0;
             return numA - numB;
           });
-          setWeeks(loadedWeeks);
+          setWeeks(cloudWeeks);
+          setSelectedWeekId(cloudWeeks[0].id);
+          setActiveDayId(todayDayId);
+          localStorage.setItem("fittracker_excel_plans_v5", JSON.stringify(cloudWeeks));
           
-          // Select week from local storage if valid, otherwise first week
-          const savedSel = localStorage.getItem("gym_progression_selected_week");
-          if (savedSel && loadedWeeks.some(w => w.id === savedSel)) {
-            setSelectedWeekId(savedSel);
-          } else {
-            setSelectedWeekId(loadedWeeks[0].id);
-          }
+          // Write normalized data back so Firestore is up-to-date
+          await setDoc(doc(db, "weeks", cloudWeeks[0].id), sanitizeForFirestore(cloudWeeks[0]));
+          setSyncStatus("saved");
+          setLastSyncTime(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
         } else {
-          // Firestore collection is empty - initialize with default week
+          // Push initial data to cloud
           const defaultWeek = getInitialWeek();
-          await setDoc(doc(db, "weeks", defaultWeek.id), defaultWeek);
+          await setDoc(doc(db, "weeks", defaultWeek.id), sanitizeForFirestore(defaultWeek));
           setWeeks([defaultWeek]);
           setSelectedWeekId(defaultWeek.id);
+          setActiveDayId(todayDayId);
+          localStorage.setItem("fittracker_excel_plans_v5", JSON.stringify([defaultWeek]));
+          setSyncStatus("saved");
+          setLastSyncTime(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
         }
-        setSyncStatus("saved");
-      } catch (error) {
-        console.error("Error loading weeks from Firestore:", error);
+      } catch (err: any) {
+        console.warn("Firestore sync notice:", err);
         setSyncStatus("error");
-        setSyncErrorMsg(error instanceof Error ? error.message : String(error));
-        
-        // Fallback to local storage if Firestore connection fails
-        const saved = localStorage.getItem("gym_progression_weeks");
-        if (saved) {
-          try {
-            const parsed = JSON.parse(saved);
-            if (Array.isArray(parsed) && parsed.length > 0) {
-              setWeeks(parsed);
-              const savedSel = localStorage.getItem("gym_progression_selected_week");
-              if (savedSel) setSelectedWeekId(savedSel);
-              return;
-            }
-          } catch (e) {
-            console.error("Local storage fallback parsed error:", e);
-          }
-        }
-        setWeeks([getInitialWeek()]);
+        setSyncErrorMessage(err?.message || "Cloud offline oder Firestore Berechtigungen erforderlich.");
       }
     }
-    loadWeeks();
+
+    initData();
   }, []);
 
-  // Apply Theme Mode class on HTML document
-  useEffect(() => {
-    if (darkMode) {
-      document.documentElement.classList.add("dark");
-      localStorage.setItem("gym_progression_theme", "dark");
-    } else {
-      document.documentElement.classList.remove("dark");
-      localStorage.setItem("gym_progression_theme", "light");
-    }
-  }, [darkMode]);
-
-  // Synchronize with local storage as a quick backup
+  // Save to LocalStorage whenever weeks change
   useEffect(() => {
     if (weeks.length > 0) {
-      localStorage.setItem("gym_progression_weeks", JSON.stringify(weeks));
+      localStorage.setItem("fittracker_excel_plans_v5", JSON.stringify(weeks));
     }
   }, [weeks]);
 
-  useEffect(() => {
-    localStorage.setItem("gym_progression_selected_week", selectedWeekId);
-  }, [selectedWeekId]);
+  const currentWeek = weeks.find((w) => w.id === selectedWeekId) || weeks[0] || getInitialWeek();
+  const currentDay = currentWeek?.days.find((d) => d.id === activeDayId) || currentWeek?.days[0];
 
-  // Find currently active week data
-  const currentWeek = weeks.find((w) => w.id === selectedWeekId) || weeks[0];
-
-  // Handler to update the current week's state
-  const handleCurrentWeekChange = async (updatedWeek: WeekData) => {
-    const updatedWeeks = weeks.map((w) => (w.id === updatedWeek.id ? updatedWeek : w));
-    setWeeks(updatedWeeks);
-
-    try {
-      setSyncStatus("saving");
-      setSyncErrorMsg(null);
-      await setDoc(doc(db, "weeks", updatedWeek.id), updatedWeek);
-      setSyncStatus("saved");
-    } catch (error) {
-      console.error("Error saving week change to Firestore:", error);
-      setSyncStatus("error");
-      setSyncErrorMsg(error instanceof Error ? error.message : String(error));
+  // Save changes to Firestore with debounce and sanitized payload
+  const triggerCloudSave = (updatedWeek: WeekPlan) => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
     }
-  };
+    setSyncStatus("saving");
 
-  // Helper to change the active week from the dropdown
-  const handleWeekSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setSelectedWeekId(e.target.value);
-  };
-
-  // Handler to update the phase description (e.g. "Lean Bulk")
-  const handlePhaseChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const updatedValue = e.target.value;
-    const updatedWeeks = weeks.map((w) => {
-      if (w.id === selectedWeekId) {
-        return { ...w, phase: updatedValue };
-      }
-      return w;
-    });
-    setWeeks(updatedWeeks);
-
-    const activeWeek = updatedWeeks.find(w => w.id === selectedWeekId);
-    if (activeWeek) {
+    saveTimerRef.current = setTimeout(async () => {
       try {
-        setSyncStatus("saving");
-        setSyncErrorMsg(null);
-        await setDoc(doc(db, "weeks", activeWeek.id), activeWeek);
+        const sanitized = sanitizeForFirestore(updatedWeek);
+        await setDoc(doc(db, "weeks", updatedWeek.id), sanitized);
         setSyncStatus("saved");
-      } catch (error) {
-        console.error("Error saving phase to Firestore:", error);
+        setLastSyncTime(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+        setSyncErrorMessage("");
+      } catch (err: any) {
+        console.warn("Cloud save error:", err);
         setSyncStatus("error");
-        setSyncErrorMsg(error instanceof Error ? error.message : String(error));
+        setSyncErrorMessage(err?.message || "Konnte nicht in Firestore schreiben.");
       }
-    }
+    }, 700);
   };
 
-  // Synchronize full list changes from DataManagement tab
-  const handleWeeksChange = async (updatedWeeks: WeekData[]) => {
-    const oldWeeks = [...weeks];
+  // Handler for Day Updates from child excel tables
+  const handleUpdateDay = (updatedDay: DayPlan) => {
+    const updatedDays = currentWeek.days.map((d) => (d.id === updatedDay.id ? updatedDay : d));
+    const updatedWeek: WeekPlan = {
+      ...currentWeek,
+      days: updatedDays,
+    };
+
+    setWeeks((prev) => prev.map((w) => (w.id === updatedWeek.id ? updatedWeek : w)));
+    triggerCloudSave(updatedWeek);
+  };
+
+  // Handler for Week Updates (Weight tracker rows)
+  const handleUpdateWeek = (updatedWeek: WeekPlan) => {
+    setWeeks((prev) => prev.map((w) => (w.id === updatedWeek.id ? updatedWeek : w)));
+    triggerCloudSave(updatedWeek);
+  };
+
+  // Add new Week (Duplicates current structure for new week)
+  const handleAddWeek = () => {
+    const nextNum = weeks.length + 1;
+    const newWeek = createNewWeekPlan(nextNum, currentWeek);
+    const updatedWeeks = [...weeks, newWeek];
     setWeeks(updatedWeeks);
+    setSelectedWeekId(newWeek.id);
+    setActiveDayId(todayDayId);
+    triggerCloudSave(newWeek);
+  };
 
+  // Edit current week phase
+  const handleUpdatePhase = (phaseVal: string) => {
+    const updated: WeekPlan = { ...currentWeek, phase: phaseVal };
+    setWeeks((prev) => prev.map((w) => (w.id === updated.id ? updated : w)));
+    triggerCloudSave(updated);
+  };
+
+  // Manual trigger to re-save immediately
+  const handleManualSync = async () => {
+    setSyncStatus("saving");
     try {
-      setSyncStatus("saving");
-      setSyncErrorMsg(null);
-      
-      // Save all current weeks
-      for (const week of updatedWeeks) {
-        await setDoc(doc(db, "weeks", week.id), week);
-      }
-
-      // Find and delete any weeks that are no longer in the list
-      const newIds = new Set(updatedWeeks.map(w => w.id));
-      const deletedWeeks = oldWeeks.filter(w => !newIds.has(w.id));
-      for (const dw of deletedWeeks) {
-        await deleteDoc(doc(db, "weeks", dw.id));
-      }
-
+      const sanitized = sanitizeForFirestore(currentWeek);
+      await setDoc(doc(db, "weeks", currentWeek.id), sanitized);
       setSyncStatus("saved");
-    } catch (error) {
-      console.error("Error syncing bulk weeks list:", error);
+      setLastSyncTime(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+      setSyncErrorMessage("");
+    } catch (err: any) {
       setSyncStatus("error");
-      setSyncErrorMsg(error instanceof Error ? error.message : String(error));
+      setSyncErrorMessage(err?.message || "Fehler beim Cloud-Speichern.");
     }
   };
 
-  if (weeks.length === 0 && syncStatus === "loading") {
-    return (
-      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col items-center justify-center p-6 transition-colors duration-300">
-        <div className="text-center space-y-4">
-          <Loader2 className="w-12 h-12 text-indigo-550 dark:text-indigo-500 animate-spin mx-auto" />
-          <h2 className="text-lg font-black text-slate-850 dark:text-slate-100">Lade Trainingsdaten...</h2>
-          <p className="text-xs text-slate-400 dark:text-slate-500">Verbindung zu Firestore wird aufgebaut</p>
-        </div>
-      </div>
-    );
-  }
+  // Reset to default
+  const handleReset = () => {
+    if (window.confirm("Möchtest du den gesamten Plan auf den Standard-Trainings- & Ernährungsplan zurücksetzen?")) {
+      const initial = getInitialWeek();
+      setWeeks([initial]);
+      setSelectedWeekId(initial.id);
+      setActiveDayId(todayDayId);
+      localStorage.setItem("fittracker_excel_plans_v5", JSON.stringify([initial]));
+      triggerCloudSave(initial);
+    }
+  };
+
+  // Settings Handler: Update which training happens on which day
+  const handleUpdateDayTraining = (dayId: string, preset: WorkoutPresetType, customTitle?: string) => {
+    const updatedDays = currentWeek.days.map((d) => {
+      if (d.id !== dayId) return d;
+
+      if (preset === "brust_ruecken") {
+        return {
+          ...d,
+          focusTitle: "BRUST / RÜCKEN (TRAINING 1)",
+          gymRows: getBrustRueckenGymRows(),
+          cardioRows: getTrainingDayCardioRows(),
+        };
+      }
+      if (preset === "arme_schultern") {
+        return {
+          ...d,
+          focusTitle: "ARME / SCHULTERN (TRAINING 2)",
+          gymRows: getArmeSchulternGymRows(),
+          cardioRows: getTrainingDayCardioRows(),
+        };
+      }
+      if (preset === "rest_run") {
+        return {
+          ...d,
+          focusTitle: "RESTDAY (LAUFEN & ERHOLUNG)",
+          gymRows: getRestdayGymRows(),
+          cardioRows: getRestdayCardioRows(),
+        };
+      }
+      if (preset === "krank_pause") {
+        return {
+          ...d,
+          focusTitle: "KRANK / SCHONUNG (PAUSE)",
+          gymRows: [
+            { id: `g_sick_${d.id}`, name: "Krankheit / Pause / Erholung", setsAndWeight: "Pause", notes: "Volle Regeneration, viel trinken & schlafen" }
+          ],
+          cardioRows: [
+            { id: `c_sick_${d.id}`, activity: "Schonung / Bettruhe", duration: "Ganztägig", intensity: "Keine Belastung", steps: "Nach Befinden", calories: "0 kcal", notes: "Gute Besserung!" }
+          ],
+        };
+      }
+      if (customTitle) {
+        return { ...d, focusTitle: customTitle };
+      }
+      return d;
+    });
+
+    const updatedWeek = { ...currentWeek, days: updatedDays };
+    setWeeks((prev) => prev.map((w) => (w.id === updatedWeek.id ? updatedWeek : w)));
+    triggerCloudSave(updatedWeek);
+  };
+
+  // Settings Handler: Apply Training-Training-Rest-Repeat pattern across current week
+  const handleApplyTTRepeatPattern = () => {
+    const patterns: { preset: WorkoutPresetType }[] = [
+      { preset: "brust_ruecken" }, // MO
+      { preset: "arme_schultern" }, // DI
+      { preset: "rest_run" },      // MI
+      { preset: "brust_ruecken" }, // DO
+      { preset: "arme_schultern" }, // FR
+      { preset: "rest_run" },      // SA
+      { preset: "brust_ruecken" }, // SO
+    ];
+
+    const updatedDays = currentWeek.days.map((d, idx) => {
+      const pattern = patterns[idx % 7];
+      if (pattern.preset === "brust_ruecken") {
+        return {
+          ...d,
+          focusTitle: "BRUST / RÜCKEN (TRAINING 1)",
+          gymRows: getBrustRueckenGymRows(),
+          cardioRows: getTrainingDayCardioRows(),
+        };
+      }
+      if (pattern.preset === "arme_schultern") {
+        return {
+          ...d,
+          focusTitle: "ARME / SCHULTERN (TRAINING 2)",
+          gymRows: getArmeSchulternGymRows(),
+          cardioRows: getTrainingDayCardioRows(),
+        };
+      }
+      return {
+        ...d,
+        focusTitle: "RESTDAY (LAUFEN & ERHOLUNG)",
+        gymRows: getRestdayGymRows(),
+        cardioRows: getRestdayCardioRows(),
+      };
+    });
+
+    const updatedWeek = { ...currentWeek, days: updatedDays };
+    setWeeks((prev) => prev.map((w) => (w.id === updatedWeek.id ? updatedWeek : w)));
+    triggerCloudSave(updatedWeek);
+  };
+
+  // Download backup JSON
+  const handleDownloadBackup = () => {
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(weeks, null, 2));
+    const downloadAnchor = document.createElement("a");
+    downloadAnchor.setAttribute("href", dataStr);
+    downloadAnchor.setAttribute("download", `fittracker_backup_${new Date().toISOString().split("T")[0]}.json`);
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+  };
+
+  // Compute weekly weight average for badge in tab
+  const validWeights = (currentWeek?.weightRows || [])
+    .map((r) => (typeof r.weight === "number" ? r.weight : parseFloat(String(r.weight))))
+    .filter((w) => !isNaN(w) && w > 0);
+  const weeklyAvgStr =
+    validWeights.length > 0
+      ? `${(validWeights.reduce((a, b) => a + b, 0) / validWeights.length).toFixed(1)} kg`
+      : "";
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans flex flex-col antialiased transition-colors duration-300">
-      {/* 1. Header Section */}
-      <header className="bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800 sticky top-0 z-50 shadow-2xs transition-colors duration-300">
-        <div className="max-w-7xl mx-auto px-4 py-3.5 sm:px-6 lg:px-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div className="min-h-screen bg-[#111113] text-white flex flex-col font-sans antialiased selection:bg-cyan-500 selection:text-black">
+      
+      {/* 1. Slim Clean Header with Logo, Day/Week Title & Settings Button */}
+      <header className="w-full px-4 sm:px-8 py-2.5 border-b border-white/10 bg-[#151518]/95 backdrop-blur-md sticky top-0 z-40 shadow-sm">
+        <div className="max-w-[1720px] mx-auto flex items-center justify-between gap-3">
           
-          {/* Brand Logo & Name */}
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-slate-900 dark:bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-xs">
-              <Dumbbell className="w-5.5 h-5.5" />
+          {/* Logo */}
+          <div className="flex items-center gap-2 select-none">
+            <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-[#107c41] via-[#00c8ff] to-[#a855f7] flex items-center justify-center font-bold text-white shadow-sm">
+              <Table className="w-3.5 h-3.5" />
             </div>
-            <div>
-              <h1 className="text-lg font-black tracking-tight text-slate-900 dark:text-white">Gym Progression</h1>
-              <p className="text-[11px] text-slate-400 dark:text-slate-500 font-medium uppercase tracking-wider">Dein intelligenter Trainingspartner</p>
+            <div className="flex items-baseline gap-1">
+              <span className="text-white font-black text-lg tracking-tight uppercase">
+                FITTRACKER
+              </span>
+              <span className="text-[#00c8ff] font-black text-lg tracking-tight uppercase">
+                SHEETS
+              </span>
             </div>
           </div>
 
-          {/* Quick config options: Week selector & Training phase */}
-          <div className="flex flex-wrap items-center gap-3 sm:self-center">
-            {/* Cloud Sync Status Indicator */}
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-150 dark:border-slate-800/80 text-[10px] font-bold uppercase tracking-wider bg-slate-50/50 dark:bg-slate-950/30">
-              {syncStatus === "loading" && (
-                <>
-                  <Loader2 className="w-3.5 h-3.5 text-indigo-500 animate-spin" />
-                  <span className="text-indigo-600 dark:text-indigo-400">Verbinde...</span>
-                </>
-              )}
-              {syncStatus === "saving" && (
-                <>
-                  <Loader2 className="w-3.5 h-3.5 text-sky-500 animate-spin" />
-                  <span className="text-sky-600 dark:text-sky-400">Speichert...</span>
-                </>
-              )}
-              {syncStatus === "saved" && (
-                <>
-                  <Cloud className="w-3.5 h-3.5 text-emerald-500" />
-                  <span className="text-emerald-600 dark:text-emerald-400">Synchronisiert</span>
-                </>
-              )}
-              {syncStatus === "error" && (
-                <>
-                  <AlertTriangle className="w-3.5 h-3.5 text-rose-500 animate-pulse" />
-                  <span className="text-rose-600 dark:text-rose-400">Sync-Fehler</span>
-                </>
-              )}
-            </div>
+          {/* Center Info: Current Day & Focus */}
+          <div className="hidden md:flex items-center gap-2 text-xs">
+            <span className="text-zinc-400 font-medium">Heute:</span>
+            <span className="text-white font-bold">{currentDay?.name}</span>
+            <span className="text-zinc-600">•</span>
+            <span className={`font-semibold px-2 py-0.5 rounded-md text-[11px] ${
+              currentDay?.focusTitle?.includes("REST")
+                ? "bg-amber-500/15 text-amber-300 border border-amber-500/25"
+                : currentDay?.focusTitle?.includes("KRANK")
+                  ? "bg-rose-500/15 text-rose-300 border border-rose-500/25"
+                  : "bg-cyan-500/15 text-cyan-300 border border-cyan-500/25"
+            }`}>
+              {currentDay?.focusTitle}
+            </span>
+          </div>
 
-            {/* Week Selector */}
-            <div className="flex items-center bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-1.5 gap-2 hover:border-slate-300 dark:hover:border-slate-600 transition-colors">
-              <Calendar className="w-4 h-4 text-slate-400 dark:text-slate-500" />
-              <select
-                className="bg-transparent border-none text-xs font-bold text-slate-700 dark:text-slate-300 focus:outline-none outline-none cursor-pointer"
-                value={selectedWeekId}
-                onChange={handleWeekSelect}
-              >
-                {weeks.map((week) => (
-                  <option key={week.id} value={week.id} className="dark:bg-slate-800">
-                    {week.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Phase (Goal) Input */}
-            <div className="flex items-center bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-1.5 gap-2 hover:border-slate-300 dark:hover:border-slate-600 transition-colors">
-              <span className="text-xs text-slate-400 dark:text-slate-500 font-semibold uppercase tracking-wider">Phase:</span>
-              <input
-                type="text"
-                className="bg-transparent border-none text-xs font-bold text-slate-700 dark:text-slate-300 w-24 focus:outline-none outline-none"
-                value={currentWeek?.phase || ""}
-                onChange={handlePhaseChange}
-                placeholder="Lean Bulk"
-                title="Aktuelle Phase (z.B. Lean Bulk, Cut)"
-              />
-            </div>
-
-            {/* Dark Mode Toggle Button */}
+          {/* Right Header: Settings Zahnrad Button */}
+          <div className="flex items-center gap-2">
             <button
-              onClick={() => setDarkMode(!darkMode)}
-              className="w-10 h-10 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 text-slate-500 dark:text-slate-400 flex items-center justify-center transition-all cursor-pointer"
-              title={darkMode ? "Licht-Modus aktivieren" : "Dunkel-Modus aktivieren"}
+              onClick={() => setShowSettingsModal(true)}
+              title="Einstellungen & Trainingstage (z.B. bei Krankheit oder Verschiebungen)"
+              className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white border border-white/10 text-xs font-bold transition-all cursor-pointer shadow-sm group"
             >
-              {darkMode ? <Sun className="w-5 h-5 text-amber-500" /> : <Moon className="w-5 h-5" />}
+              <Settings className="w-4 h-4 text-zinc-400 group-hover:text-cyan-400 group-hover:rotate-45 transition-all duration-200" />
+              <span>Einstellungen</span>
             </button>
           </div>
         </div>
       </header>
 
-      {/* 2. Main Content Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 py-6 sm:px-6 lg:px-8 space-y-6">
-        
-        {/* Firebase sync error troubleshooting assistance */}
-        {syncStatus === "error" && (
-          <div className="bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/50 p-5 rounded-2xl flex flex-col md:flex-row items-start justify-between gap-4 shadow-xs transition-colors duration-300">
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 text-red-700 dark:text-red-400 font-extrabold text-sm">
-                <AlertTriangle className="w-5 h-5 shrink-0" />
-                <span>Verbindungsproblem mit der Firebase-Datenbank (Firestore)</span>
-              </div>
-              <p className="text-xs text-slate-600 dark:text-slate-300">
-                Die App konnte keine Daten mit deinem Firestore-Projekt synchronisieren. Keine Sorge: Deine Änderungen wurden als Backup im lokalen Browser-Speicher gesichert!
-              </p>
-              {syncErrorMsg && (
-                <div className="text-[11px] font-mono bg-white/70 dark:bg-black/35 border border-red-150 dark:border-red-950/60 p-2.5 rounded-lg text-red-800 dark:text-red-350 select-all leading-normal">
-                  <strong>Fehler-Details:</strong> {syncErrorMsg}
-                </div>
-              )}
-              <div className="pt-2 text-xs text-slate-500 dark:text-slate-400 space-y-1 font-medium">
-                <p className="font-bold text-slate-700 dark:text-slate-300">🛠️ So behebst du diesen Fehler in deiner Firebase-Konsole:</p>
-                <ul className="list-disc list-inside space-y-1">
-                  {syncErrorMsg?.toLowerCase().includes("permission") || syncErrorMsg?.toLowerCase().includes("rechte") ? (
-                    <li>
-                      <strong>Datenbank-Regeln sperren den Zugriff:</strong> Gehe in deiner Firebase-Konsole unter <em>Firestore Database</em> auf den Reiter <strong>Regeln (Rules)</strong> und ändere die Regeln so, dass öffentlicher Zugriff erlaubt ist (z.B. im Testmodus: <code>allow read, write: if true;</code>).
-                    </li>
-                  ) : syncErrorMsg?.toLowerCase().includes("not-found") || syncErrorMsg?.toLowerCase().includes("exist") ? (
-                    <li>
-                      <strong>Datenbank wurde nicht erstellt:</strong> Gehe in deiner Firebase-Konsole unter <em>Firestore Database</em> und klicke auf den Button <strong>'Datenbank erstellen' (Create Database)</strong>.
-                    </li>
-                  ) : (
-                    <>
-                      <li>
-                        <strong>Datenbank nicht erstellt?</strong> Gehe im Firebase Console Menü auf <strong>Firestore Database</strong> und klicke auf <strong>Datenbank erstellen</strong>.
-                      </li>
-                      <li>
-                        <strong>Zugriffsregeln prüfen:</strong> Gehe im Firebase Menü unter <em>Firestore Database</em> auf den Reiter <strong>Regeln (Rules)</strong> und stelle sicher, dass Lese-/Schreibrechte für Testmodus aktiv sind (z.B. <code>allow read, write: if true;</code>).
-                      </li>
-                    </>
-                  )}
-                  <li>
-                    <strong>Netzwerk/Offline:</strong> Prüfe deine Internetverbindung.
-                  </li>
-                </ul>
-              </div>
+      {/* 2. Compact Weekday Selector (MO, DI, MI, DO, FR, SA, SO) */}
+      <div className="w-full bg-[#161619] border-b border-white/10 px-4 sm:px-8 py-2">
+        <div className="max-w-[1720px] mx-auto">
+          {/* Compact 7-Day Bar */}
+          <div className="grid grid-cols-7 gap-1.5 sm:gap-2">
+            {currentWeek?.days.map((day) => {
+              const isActive = day.id === activeDayId;
+              const isToday = day.id === todayDayId;
+              const dateStr = day.date || weekDates[day.id] || "";
+              const isRest = day.focusTitle?.toUpperCase().includes("REST");
+              const isKrank = day.focusTitle?.toUpperCase().includes("KRANK");
+
+              // Short workout label
+              let shortWorkout = day.focusTitle.replace(" (TRAINING 1)", "").replace(" (TRAINING 2)", "");
+              if (isRest) shortWorkout = "Laufen";
+              if (isKrank) shortWorkout = "Pause";
+
+              return (
+                <button
+                  key={day.id}
+                  onClick={() => setActiveDayId(day.id)}
+                  type="button"
+                  title={`${day.name} - ${day.focusTitle}`}
+                  className={`group relative py-2 px-1 sm:px-2 rounded-xl text-center transition-all duration-150 cursor-pointer border flex flex-col items-center justify-center ${
+                    isActive
+                      ? "bg-cyan-500 text-black border-cyan-400 shadow-md font-bold ring-1 ring-cyan-300"
+                      : "bg-[#1d1d23] hover:bg-[#26262e] text-zinc-300 hover:text-white border-white/5 hover:border-white/15"
+                  }`}
+                >
+                  {/* Day Label & Today Dot */}
+                  <div className="flex items-center gap-1 justify-center">
+                    <span className={`text-sm sm:text-base font-black tracking-tight ${
+                      isActive ? "text-black" : "text-white"
+                    }`}>
+                      {day.label}
+                    </span>
+                    {isToday && (
+                      <span className={`w-1.5 h-1.5 rounded-full ${isActive ? "bg-black" : "bg-cyan-400"}`} title="Heute" />
+                    )}
+                  </div>
+
+                  {/* Date */}
+                  <div className={`text-[10px] sm:text-[11px] font-mono leading-tight ${
+                    isActive ? "text-black/80 font-bold" : "text-zinc-400"
+                  }`}>
+                    {dateStr}
+                  </div>
+
+                  {/* Tiny workout focus */}
+                  <div className={`text-[9px] sm:text-[10px] font-semibold truncate max-w-full mt-0.5 px-1 rounded ${
+                    isActive
+                      ? "text-black/90 font-bold bg-black/10"
+                      : isRest
+                        ? "text-amber-400"
+                        : isKrank
+                          ? "text-rose-400"
+                          : "text-zinc-400 group-hover:text-cyan-300"
+                  }`}>
+                    {shortWorkout}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Clean selected day indicator */}
+          <div className="mt-1.5 pt-1.5 border-t border-white/5 flex items-center justify-between text-xs text-zinc-400">
+            <div className="flex items-center gap-2">
+              <span className="text-white font-bold">{currentDay?.name}</span>
+              <span className="text-zinc-500 font-mono text-[11px]">({currentDay?.date || weekDates[currentDay?.id || ""]})</span>
+              <span className="text-zinc-600">•</span>
+              <span className={`font-semibold px-2 py-0.5 rounded-md text-[11px] ${
+                currentDay?.focusTitle?.includes("REST")
+                  ? "bg-amber-500/15 text-amber-300 border border-amber-500/25"
+                  : currentDay?.focusTitle?.includes("KRANK")
+                    ? "bg-rose-500/15 text-rose-300 border border-rose-500/25"
+                    : "bg-cyan-500/15 text-cyan-300 border border-cyan-500/25"
+              }`}>
+                {currentDay?.focusTitle}
+              </span>
             </div>
-            <button 
-              onClick={() => {
-                window.location.reload();
-              }}
-              className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white dark:bg-red-800 dark:hover:bg-red-700 text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer shrink-0 mt-2 md:mt-0"
+            <div className="hidden sm:flex items-center gap-3 text-[11px] font-mono text-zinc-400">
+              <span>Gym: <strong className="text-white">{currentDay?.gymRows?.length || 0}</strong></span>
+              <span>•</span>
+              <span>Cardio: <strong className="text-white">{currentDay?.cardioRows?.length || 0}</strong></span>
+              <span>•</span>
+              <span>Mahlzeiten: <strong className="text-white">{currentDay?.nutritionRows?.length || 0}</strong></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 3. Excel Spreadsheet Tab Navigation (4 Tabs) */}
+      <div className="w-full bg-[#131316] border-b border-white/5 px-4 sm:px-8 py-2">
+        <div className="max-w-[1720px] mx-auto flex items-center justify-between flex-wrap gap-2">
+          
+          {/* 4 Main Table Tabs */}
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0">
+            {/* Tab 1: Gym */}
+            <button
+              onClick={() => setActiveTab("gym")}
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer whitespace-nowrap ${
+                activeTab === "gym"
+                  ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm"
+                  : "bg-[#1c1c20] hover:bg-[#25252c] text-zinc-400 hover:text-zinc-200 border border-white/5"
+              }`}
             >
-              Erneut versuchen
+              <Dumbbell className="w-4 h-4 text-cyan-400" />
+              <span>Tabelle 1: Gym-Training</span>
+              <span className="text-[11px] px-1.5 py-0.2 rounded-md bg-white/10 text-zinc-300 font-mono">
+                {currentDay?.gymRows?.length || 0}
+              </span>
+            </button>
+
+            {/* Tab 2: Cardio */}
+            <button
+              onClick={() => setActiveTab("cardio")}
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer whitespace-nowrap ${
+                activeTab === "cardio"
+                  ? "bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm"
+                  : "bg-[#1c1c20] hover:bg-[#25252c] text-zinc-400 hover:text-zinc-200 border border-white/5"
+              }`}
+            >
+              <Activity className="w-4 h-4 text-amber-400" />
+              <span>Tabelle 2: Cardio & Laufen</span>
+              <span className="text-[11px] px-1.5 py-0.2 rounded-md bg-white/10 text-zinc-300 font-mono">
+                {currentDay?.cardioRows?.length || 0}
+              </span>
+            </button>
+
+            {/* Tab 3: Nutrition */}
+            <button
+              onClick={() => setActiveTab("nutrition")}
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer whitespace-nowrap ${
+                activeTab === "nutrition"
+                  ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm"
+                  : "bg-[#1c1c20] hover:bg-[#25252c] text-zinc-400 hover:text-zinc-200 border border-white/5"
+              }`}
+            >
+              <Utensils className="w-4 h-4 text-emerald-400" />
+              <span>Tabelle 3: Ernährungsplan</span>
+              <span className="text-[11px] px-1.5 py-0.2 rounded-md bg-white/10 text-zinc-300 font-mono">
+                {currentDay?.nutritionRows?.length || 0}
+              </span>
+            </button>
+
+            {/* Tab 4: Weight Tracker */}
+            <button
+              onClick={() => setActiveTab("weight")}
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer whitespace-nowrap ${
+                activeTab === "weight"
+                  ? "bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-sm"
+                  : "bg-[#1c1c20] hover:bg-[#25252c] text-zinc-400 hover:text-zinc-200 border border-white/5"
+              }`}
+            >
+              <Scale className="w-4 h-4 text-purple-400" />
+              <span>Tabelle 4: Gewichtstrack</span>
+              {weeklyAvgStr ? (
+                <span className="text-[11px] px-1.5 py-0.2 rounded-md bg-purple-500/30 text-purple-200 font-mono font-bold">
+                  Ø {weeklyAvgStr}
+                </span>
+              ) : (
+                <span className="text-[11px] px-1.5 py-0.2 rounded-md bg-white/10 text-zinc-300 font-mono">
+                  {currentWeek?.weightRows?.length || 0}
+                </span>
+              )}
             </button>
           </div>
+
+          {/* Toggle: View all 4 tables */}
+          <div className="flex items-center">
+            <button
+              onClick={() => setActiveTab(activeTab === "all" ? "gym" : "all")}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer whitespace-nowrap ${
+                activeTab === "all"
+                  ? "bg-gradient-to-r from-cyan-500/20 to-purple-500/20 text-white border-white/30"
+                  : "bg-[#1c1c20] hover:bg-[#25252c] text-zinc-400 hover:text-white border-white/5"
+              }`}
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
+              <span>Alle Tabellen anzeigen</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* 4. Main Tables Area */}
+      <main className="flex-1 max-w-[1720px] w-full mx-auto p-4 sm:p-6 lg:p-8">
+        {currentDay && (
+          <>
+            {/* View Mode: SINGLE TAB (Full Focus Excel View) */}
+            {activeTab === "gym" && (
+              <div className="w-full">
+                <GymExcelTable 
+                  currentDay={currentDay} 
+                  onUpdateDay={handleUpdateDay}
+                  onSwitchTab={(tab) => setActiveTab(tab)}
+                />
+              </div>
+            )}
+
+            {activeTab === "cardio" && (
+              <div className="w-full">
+                <CardioExcelTable currentDay={currentDay} onUpdateDay={handleUpdateDay} />
+              </div>
+            )}
+
+            {activeTab === "nutrition" && (
+              <div className="w-full">
+                <NutritionExcelTable currentDay={currentDay} onUpdateDay={handleUpdateDay} />
+              </div>
+            )}
+
+            {activeTab === "weight" && (
+              <div className="w-full">
+                <WeightExcelTable currentWeek={currentWeek} onUpdateWeek={handleUpdateWeek} />
+              </div>
+            )}
+
+            {/* View Mode: ALL TABLES (Full Overview) */}
+            {activeTab === "all" && (
+              <div className="flex flex-col gap-8">
+                <GymExcelTable 
+                  currentDay={currentDay} 
+                  onUpdateDay={handleUpdateDay}
+                  onSwitchTab={(tab) => setActiveTab(tab)}
+                />
+                <WeightExcelTable currentWeek={currentWeek} onUpdateWeek={handleUpdateWeek} />
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
+                  <CardioExcelTable currentDay={currentDay} onUpdateDay={handleUpdateDay} />
+                  <NutritionExcelTable currentDay={currentDay} onUpdateDay={handleUpdateDay} />
+                </div>
+              </div>
+            )}
+          </>
         )}
-
-        {/* Weekly Dashboard Metrics (Dynamic calculated values) */}
-        {currentWeek && <Dashboard weekData={currentWeek} />}
-
-        {/* 3. Navigation Workspaces Tabs */}
-        <div className="flex border-b border-slate-200 dark:border-slate-800 overflow-x-auto pb-px gap-1">
-          <button
-            onClick={() => setActiveTab("focus")}
-            className={`flex items-center gap-2 py-3 px-4 text-sm font-bold border-b-2 transition-all shrink-0 cursor-pointer ${
-              activeTab === "focus"
-                ? "border-slate-850 dark:border-indigo-500 text-slate-900 dark:text-white bg-white dark:bg-slate-900 rounded-t-xl"
-                : "border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900/50 rounded-t-xl"
-            }`}
-          >
-            <Timer className="w-4 h-4" />
-            Tages-Fokus (Gym Mode)
-          </button>
-          <button
-            onClick={() => setActiveTab("nutrition")}
-            className={`flex items-center gap-2 py-3 px-4 text-sm font-bold border-b-2 transition-all shrink-0 cursor-pointer ${
-              activeTab === "nutrition"
-                ? "border-slate-850 dark:border-indigo-500 text-slate-900 dark:text-white bg-white dark:bg-slate-900 rounded-t-xl"
-                : "border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900/50 rounded-t-xl"
-            }`}
-          >
-            <Apple className="w-4 h-4" />
-            Ernährungsplan
-          </button>
-          <button
-            onClick={() => setActiveTab("analytics")}
-            className={`flex items-center gap-2 py-3 px-4 text-sm font-bold border-b-2 transition-all shrink-0 cursor-pointer ${
-              activeTab === "analytics"
-                ? "border-slate-850 dark:border-indigo-500 text-slate-900 dark:text-white bg-white dark:bg-slate-900 rounded-t-xl"
-                : "border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900/50 rounded-t-xl"
-            }`}
-          >
-            <TrendingUp className="w-4 h-4" />
-            Analysen & Fortschritt
-          </button>
-          <button
-            onClick={() => setActiveTab("data")}
-            className={`flex items-center gap-2 py-3 px-4 text-sm font-bold border-b-2 transition-all shrink-0 cursor-pointer ${
-              activeTab === "data"
-                ? "border-slate-850 dark:border-indigo-500 text-slate-900 dark:text-white bg-white dark:bg-slate-900 rounded-t-xl"
-                : "border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900/50 rounded-t-xl"
-            }`}
-          >
-            <Settings className="w-4 h-4" />
-            Daten & Backups
-          </button>
-        </div>
-
-        {/* 4. Active Workspace Workspace Component */}
-        <div className="pt-2">
-          {activeTab === "focus" && currentWeek && (
-            <DayFocusView
-              weekData={currentWeek}
-              onChange={handleCurrentWeekChange}
-              activeDayId={activeDayId}
-              setActiveDayId={setActiveDayId}
-            />
-          )}
-
-          {activeTab === "nutrition" && (
-            <NutritionView />
-          )}
-
-          {activeTab === "analytics" && weeks.length > 0 && (
-            <AnalyticsView allWeeks={weeks} />
-          )}
-
-          {activeTab === "data" && (
-            <DataManagement
-              allWeeks={weeks}
-              selectedWeekId={selectedWeekId}
-              onWeeksChange={handleWeeksChange}
-              onSelectedWeekChange={setSelectedWeekId}
-            />
-          )}
-        </div>
       </main>
 
-      {/* 5. Footer */}
-      <footer className="bg-white dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800 py-6 mt-12 transition-colors duration-300">
-        <div className="max-w-7xl mx-auto px-4 text-center sm:px-6 lg:px-8 space-y-2">
-          <p className="text-xs text-slate-400 dark:text-slate-500 font-medium">
-            Gym Progression • Cloud-Synchronisiert mit Firestore
-          </p>
-          <p className="text-[10px] text-slate-350 dark:text-slate-600">
-            Deine Daten werden live in deiner Firestore-Datenbank gespeichert, sodass du von jedem Gerät darauf zugreifen kannst.
-          </p>
+      {/* 5. Bottom Bar: Wochenauswahl, Phase & Cloud-Sicherung NACH UNTEN VERLEGT */}
+      <footer className="w-full bg-[#141417] border-t border-white/10 px-4 sm:px-8 py-3 mt-auto shadow-2xl">
+        <div className="max-w-[1720px] mx-auto flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+          
+          {/* Left: Wochenauswahl, Neue Woche & Phase */}
+          <div className="flex items-center flex-wrap gap-2.5">
+            {/* Week Selector Dropdown */}
+            <div className="flex items-center bg-[#1d1d23] border border-white/10 rounded-xl px-2.5 py-1 gap-1.5">
+              <span className="text-zinc-500 text-[11px] font-bold uppercase">Woche:</span>
+              <select
+                value={selectedWeekId}
+                onChange={(e) => {
+                  setSelectedWeekId(e.target.value);
+                  setActiveDayId(todayDayId);
+                }}
+                className="bg-transparent text-xs font-black text-cyan-300 focus:outline-none cursor-pointer tracking-wide"
+              >
+                {weeks.map((w) => (
+                  <option key={w.id} value={w.id} className="bg-[#1a1a1f] text-white font-medium">
+                    {w.name} ({w.phase || "Aufbau"})
+                  </option>
+                ))}
+              </select>
+
+              <button
+                onClick={handleAddWeek}
+                title="Neue Woche hinzufügen (z.B. Woche 2)"
+                className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 text-[11px] font-bold transition-all cursor-pointer border border-cyan-500/20"
+              >
+                <Plus className="w-3 h-3" />
+                <span className="hidden sm:inline">+ Neue Woche</span>
+              </button>
+            </div>
+
+            {/* Phase Tag */}
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-300 text-xs font-bold">
+              <span className="text-zinc-500 uppercase text-[10px]">Phase:</span>
+              <input
+                type="text"
+                value={currentWeek?.phase || "AUFBAU"}
+                onChange={(e) => handleUpdatePhase(e.target.value)}
+                className="bg-transparent text-purple-300 font-bold focus:outline-none w-24 text-xs"
+              />
+            </div>
+          </div>
+
+          {/* Right: Cloud Status, Schnell-Sichern & Reset */}
+          <div className="flex items-center flex-wrap gap-2">
+            {/* Cloud Status Badge Button */}
+            <button
+              onClick={() => setShowSyncModal(true)}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                syncStatus === "saved"
+                  ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/20"
+                  : syncStatus === "saving"
+                  ? "bg-amber-500/10 text-amber-300 border-amber-500/30 animate-pulse"
+                  : syncStatus === "error"
+                  ? "bg-rose-500/10 text-rose-300 border-rose-500/30 hover:bg-rose-500/20"
+                  : "bg-blue-500/10 text-blue-300 border-blue-500/30"
+              }`}
+            >
+              {syncStatus === "saved" && (
+                <>
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>In Cloud gesichert</span>
+                  {lastSyncTime && <span className="text-[10px] text-zinc-400 font-mono">({lastSyncTime})</span>}
+                </>
+              )}
+              {syncStatus === "saving" && (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
+                  <span>Speichert...</span>
+                </>
+              )}
+              {syncStatus === "error" && (
+                <>
+                  <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
+                  <span>Cloud prüfen</span>
+                </>
+              )}
+              {syncStatus === "loading" && (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-cyan-400" />
+                  <span>Wird geladen...</span>
+                </>
+              )}
+            </button>
+
+            {/* Quick Sync Button */}
+            <button
+              onClick={handleManualSync}
+              title="Jetzt manuell in Cloud sichern"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 text-xs font-bold transition-all cursor-pointer"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Jetzt sichern</span>
+            </button>
+
+            {/* Reset Button */}
+            <button
+              onClick={handleReset}
+              title="Auf Standard-Plan zurücksetzen"
+              className="flex items-center gap-1 p-2 rounded-xl bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white transition-all cursor-pointer border border-white/5"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
       </footer>
+
+      {/* Settings Modal (Zahnrad für Tage & Trainingszuweisung) */}
+      <SettingsModal
+        isOpen={showSettingsModal}
+        onClose={() => setShowSettingsModal(false)}
+        days={currentWeek?.days || []}
+        onUpdateDayTraining={handleUpdateDayTraining}
+        onResetEntirePlan={handleReset}
+        onApplyTTRepeatPattern={handleApplyTTRepeatPattern}
+      />
+
+      {/* Cloud Sync Status & Help Modal */}
+      {showSyncModal && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-[#18181c] border border-white/10 rounded-2xl max-w-md w-full p-6 shadow-2xl animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-3 border-b border-white/10">
+              <div className="flex items-center gap-2">
+                <Cloud className="w-5 h-5 text-cyan-400" />
+                <h3 className="font-black text-sm uppercase tracking-wide">Cloud-Synchronisation</h3>
+              </div>
+              <button
+                onClick={() => setShowSyncModal(false)}
+                className="text-zinc-500 hover:text-white text-xs font-bold p-1 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="py-4 space-y-3 text-xs text-zinc-300">
+              <div className="flex items-start gap-2.5 p-3 rounded-xl bg-white/5 border border-white/5">
+                <Info className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
+                <div>
+                  <div className="font-bold text-white mb-0.5">Automatisches Speichern</div>
+                  <div>Jede Änderung in den Tabellen wird in Echtzeit im Browser gespeichert und sicher mit Firebase Firestore synchronisiert.</div>
+                </div>
+              </div>
+
+              <div className="space-y-1.5 p-3 rounded-xl bg-black/40 border border-white/5 font-mono text-[11px]">
+                <div className="flex justify-between">
+                  <span className="text-zinc-500">Firestore Projekt:</span>
+                  <span className="text-zinc-200">gym-progression-79e69</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-zinc-500">Status:</span>
+                  <span className={
+                    syncStatus === "saved" 
+                      ? "text-emerald-400 font-bold" 
+                      : syncStatus === "saving" 
+                      ? "text-amber-400" 
+                      : syncStatus === "error"
+                      ? "text-rose-400 font-bold"
+                      : "text-blue-400"
+                  }>
+                    {syncStatus === "saved" && "Verbunden & Gesichert ✓"}
+                    {syncStatus === "saving" && "Wird gespeichert..."}
+                    {syncStatus === "error" && "Fehler beim Sync"}
+                    {syncStatus === "loading" && "Wird initialisiert..."}
+                  </span>
+                </div>
+                {lastSyncTime && (
+                  <div className="flex justify-between">
+                    <span className="text-zinc-500">Letzter Sync:</span>
+                    <span className="text-zinc-300">{lastSyncTime}</span>
+                  </div>
+                )}
+                {syncErrorMessage && (
+                  <div className="pt-2 text-rose-400 text-[10px] break-all border-t border-white/10">
+                    Meldung: {syncErrorMessage}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex flex-col gap-2 pt-2">
+                <button
+                  onClick={async () => {
+                    await handleManualSync();
+                  }}
+                  className="w-full py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-black font-extrabold text-xs transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-md hover:opacity-95"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Jetzt in Cloud sichern</span>
+                </button>
+
+                <button
+                  onClick={handleDownloadBackup}
+                  className="w-full py-2 rounded-xl bg-white/5 hover:bg-white/10 text-zinc-300 font-bold text-xs transition-all cursor-pointer flex items-center justify-center gap-1.5 border border-white/10"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Backup als JSON herunterladen</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

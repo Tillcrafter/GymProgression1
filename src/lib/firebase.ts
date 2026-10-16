@@ -1,7 +1,8 @@
 import { initializeApp } from "firebase/app";
 import { getFirestore, doc, getDocFromServer } from "firebase/firestore";
+import { getAuth, signInAnonymously } from "firebase/auth";
 
-// User's manual Firebase configuration
+// User's Firebase configuration
 const firebaseConfig = {
   apiKey: "AIzaSyD0OU0wrSGqyia5sKmmPdloMF1gK_GsOO8",
   authDomain: "gym-progression-79e69.firebaseapp.com",
@@ -12,8 +13,14 @@ const firebaseConfig = {
 };
 
 // Initialize Firebase
-const app = initializeApp(firebaseConfig);
+export const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app);
+export const auth = getAuth(app);
+
+// Attempt anonymous sign-in if rules require authentication
+signInAnonymously(auth).catch(() => {
+  // It's completely fine if anonymous auth is disabled; public rules will work directly
+});
 
 export enum OperationType {
   CREATE = "create",
@@ -28,34 +35,24 @@ export interface FirestoreErrorInfo {
   error: string;
   operationType: OperationType;
   path: string | null;
-  authInfo: {
-    userId?: string | null;
-    email?: string | null;
-  };
 }
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: null,
-      email: null,
-    },
     operationType,
     path,
   };
-  console.error("Firestore Error: ", JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
+  console.warn("Firestore status: ", errInfo);
 }
 
-// Connection test
-async function testConnection() {
+// Quick connection test
+export async function testConnection(): Promise<boolean> {
   try {
-    await getDocFromServer(doc(db, "test", "connection"));
+    await getDocFromServer(doc(db, "weeks", "test_connection"));
+    return true;
   } catch (error) {
-    if (error instanceof Error && error.message.includes("the client is offline")) {
-      console.error("Please check your Firebase configuration or connection.");
-    }
+    console.warn("Firebase test:", error);
+    return false;
   }
 }
-testConnection();

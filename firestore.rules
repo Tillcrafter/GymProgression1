@@ -1,19 +1,11 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Weeks collection: allow reading and writing for the gym logs
     match /weeks/{weekId} {
       allow read, write: if true;
     }
-
-    // Nutrition collection: allow reading and writing the plan document
-    match /nutrition/{docId} {
-      allow read, write: if true;
-    }
-    
-    // Default fallback: deny all other paths
     match /{document=**} {
-      allow read, write: if false;
+      allow read, write: if true;
     }
   }
 }
