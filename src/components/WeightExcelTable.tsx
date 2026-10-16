@@ -25,11 +25,11 @@ export default function WeightExcelTable({ currentWeek, onUpdateWeek }: WeightEx
     const updated = rows.map((r) => {
       if (r.id === id) {
         if (field === "weight") {
-          // Normalize input: allow empty, or parse float from comma/dot
+          // Allow empty string, or retain comma/dot string so user can type "76,9" without truncating
           if (value === "") return { ...r, weight: "" };
-          const normalizedStr = String(value).replace(",", ".");
-          const parsed = parseFloat(normalizedStr);
-          return { ...r, weight: isNaN(parsed) ? "" : parsed };
+          // Keep only valid characters (numbers, comma, dot)
+          const sanitized = String(value).replace(/[^0-9.,]/g, "");
+          return { ...r, weight: sanitized };
         }
         return { ...r, [field]: value };
       }
@@ -58,7 +58,14 @@ export default function WeightExcelTable({ currentWeek, onUpdateWeek }: WeightEx
 
   // Calculations for Weekly Average & Insights
   const validWeights = rows
-    .map((r) => (typeof r.weight === "number" ? r.weight : parseFloat(String(r.weight))))
+    .map((r) => {
+      if (typeof r.weight === "number") return r.weight;
+      if (typeof r.weight === "string" && r.weight.trim() !== "") {
+        const parsed = parseFloat(r.weight.replace(",", "."));
+        return isNaN(parsed) ? NaN : parsed;
+      }
+      return NaN;
+    })
     .filter((w) => !isNaN(w) && w > 0);
 
   const loggedCount = validWeights.length;

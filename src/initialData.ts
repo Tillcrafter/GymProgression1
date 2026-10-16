@@ -232,15 +232,21 @@ export function normalizeDayPlan(day: any, dayIdx: number = 0): DayPlan {
     });
   }
 
-  // If gym rows are empty OR still contain old legacy exercises, update to user's new plan
-  const hasNewPlanExercises = gymRows.some((r) => 
-    r.name.includes("Latzug") || 
-    r.name.includes("Incline Bench") || 
-    r.name.includes("Schulterdrücken") || 
-    r.name.includes("Restday")
+  // If gym rows are empty, check if we need standard fallback or if it's an intentionally open/sick day
+  const isOldMockExercises = gymRows.some((r) =>
+    r.name.includes("Bankdrücken LH") ||
+    r.name.includes("Kniebeugen") ||
+    r.name.includes("Kreuzheben konventionell")
   );
 
-  if (gymRows.length === 0 || !hasNewPlanExercises) {
+  const isSickOrOpen = 
+    (day?.focusTitle || "").toUpperCase().includes("KRANK") ||
+    (day?.focusTitle || "").toUpperCase().includes("SCHONUNG") ||
+    (day?.focusTitle || "").toUpperCase().includes("PAUSE") ||
+    (day?.focusTitle || "").toUpperCase().includes("OFFEN") ||
+    (day?.focusTitle || "").toUpperCase().includes("NOCH KEIN TRAINING");
+
+  if (isOldMockExercises || (gymRows.length === 0 && !isSickOrOpen)) {
     gymRows = matchedConfig.getGym();
   }
 
@@ -322,7 +328,7 @@ export function normalizeWeekPlan(week: any): WeekPlan {
         dayLabel: r.dayLabel || ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"][idx] || "Tag",
         shortDay: r.shortDay || ["MO", "DI", "MI", "DO", "FR", "SA", "SO"][idx] || "TG",
         date: r.date || weekDates[["mo", "di", "mi", "do", "fr", "sa", "so"][idx]] || "",
-        weight: r.weight === "" || r.weight === undefined || r.weight === null ? "" : (typeof r.weight === "number" ? r.weight : parseFloat(String(r.weight)) || ""),
+        weight: r.weight === "" || r.weight === undefined || r.weight === null ? "" : r.weight,
         time: r.time || "Nüchtern",
         notes: r.notes || "",
       }))
@@ -402,3 +408,5 @@ export function sanitizeForFirestore(data: any): any {
   }
   return res;
 }
+
+export const cloneWeekStructure = (week: any, num?: number) => week;

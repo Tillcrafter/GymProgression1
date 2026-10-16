@@ -237,6 +237,18 @@ export default function App() {
     const updatedDays = currentWeek.days.map((d) => {
       if (d.id !== dayId) return d;
 
+      if (preset === "offen") {
+        return {
+          ...d,
+          focusTitle: "NOCH KEIN TRAINING FESTGELEGT",
+          gymRows: [
+            { id: `g_open_${d.id}`, name: "", setsAndWeight: "", notes: "Noch kein Training festgelegt" }
+          ],
+          cardioRows: [
+            { id: `c_open_${d.id}`, activity: "", duration: "", intensity: "", steps: "", calories: "", notes: "" }
+          ],
+        };
+      }
       if (preset === "brust_ruecken") {
         return {
           ...d,
@@ -278,6 +290,24 @@ export default function App() {
       }
       return d;
     });
+
+    const updatedWeek = { ...currentWeek, days: updatedDays };
+    setWeeks((prev) => prev.map((w) => (w.id === updatedWeek.id ? updatedWeek : w)));
+    triggerCloudSave(updatedWeek);
+  };
+
+  // Settings Handler: Clear all trainings for the current week to "offen"
+  const handleClearWeekTrainings = () => {
+    const updatedDays = currentWeek.days.map((d) => ({
+      ...d,
+      focusTitle: "NOCH KEIN TRAINING FESTGELEGT",
+      gymRows: [
+        { id: `g_open_${d.id}`, name: "", setsAndWeight: "", notes: "Noch kein Training festgelegt" }
+      ],
+      cardioRows: [
+        { id: `c_open_${d.id}`, activity: "", duration: "", intensity: "", steps: "", calories: "", notes: "" }
+      ],
+    }));
 
     const updatedWeek = { ...currentWeek, days: updatedDays };
     setWeeks((prev) => prev.map((w) => (w.id === updatedWeek.id ? updatedWeek : w)));
@@ -338,9 +368,16 @@ export default function App() {
     downloadAnchor.remove();
   };
 
-  // Compute weekly weight average for badge in tab
+  // Compute weekly weight average for badge in tab (supports comma numbers)
   const validWeights = (currentWeek?.weightRows || [])
-    .map((r) => (typeof r.weight === "number" ? r.weight : parseFloat(String(r.weight))))
+    .map((r) => {
+      if (typeof r.weight === "number") return r.weight;
+      if (typeof r.weight === "string" && r.weight.trim() !== "") {
+        const p = parseFloat(r.weight.replace(",", "."));
+        return isNaN(p) ? NaN : p;
+      }
+      return NaN;
+    })
     .filter((w) => !isNaN(w) && w > 0);
   const weeklyAvgStr =
     validWeights.length > 0
@@ -369,17 +406,25 @@ export default function App() {
             </div>
           </div>
 
-          {/* Center Info: Current Day & Focus */}
+          {/* Center Info: Selected Day & Focus */}
           <div className="hidden md:flex items-center gap-2 text-xs">
-            <span className="text-zinc-400 font-medium">Heute:</span>
+            <span className="text-zinc-400 font-medium">Ausgewählt:</span>
             <span className="text-white font-bold">{currentDay?.name}</span>
+            <span className="text-zinc-500 font-mono text-[11px]">({currentDay?.date})</span>
+            {currentDay?.id === todayDayId && (
+              <span className="text-[10px] px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/30">
+                Heute
+              </span>
+            )}
             <span className="text-zinc-600">•</span>
             <span className={`font-semibold px-2 py-0.5 rounded-md text-[11px] ${
-              currentDay?.focusTitle?.includes("REST")
+              currentDay?.focusTitle?.toUpperCase().includes("REST")
                 ? "bg-amber-500/15 text-amber-300 border border-amber-500/25"
-                : currentDay?.focusTitle?.includes("KRANK")
+                : currentDay?.focusTitle?.toUpperCase().includes("KRANK")
                   ? "bg-rose-500/15 text-rose-300 border border-rose-500/25"
-                  : "bg-cyan-500/15 text-cyan-300 border border-cyan-500/25"
+                  : currentDay?.focusTitle?.toUpperCase().includes("OFFEN") || currentDay?.focusTitle?.toUpperCase().includes("NOCH KEIN")
+                    ? "bg-zinc-800 text-zinc-300 border border-zinc-700"
+                    : "bg-cyan-500/15 text-cyan-300 border border-cyan-500/25"
             }`}>
               {currentDay?.focusTitle}
             </span>
@@ -596,6 +641,8 @@ export default function App() {
                   currentDay={currentDay} 
                   onUpdateDay={handleUpdateDay}
                   onSwitchTab={(tab) => setActiveTab(tab)}
+                  onApplyPreset={handleUpdateDayTraining}
+                  onOpenSettings={() => setShowSettingsModal(true)}
                 />
               </div>
             )}
@@ -625,6 +672,8 @@ export default function App() {
                   currentDay={currentDay} 
                   onUpdateDay={handleUpdateDay}
                   onSwitchTab={(tab) => setActiveTab(tab)}
+                  onApplyPreset={handleUpdateDayTraining}
+                  onOpenSettings={() => setShowSettingsModal(true)}
                 />
                 <WeightExcelTable currentWeek={currentWeek} onUpdateWeek={handleUpdateWeek} />
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
@@ -752,7 +801,11 @@ export default function App() {
         isOpen={showSettingsModal}
         onClose={() => setShowSettingsModal(false)}
         days={currentWeek?.days || []}
+        activeDayId={activeDayId}
+        onSelectDay={setActiveDayId}
+        currentWeekName={currentWeek?.name || "Woche 1"}
         onUpdateDayTraining={handleUpdateDayTraining}
+        onClearWeekTrainings={handleClearWeekTrainings}
         onResetEntirePlan={handleReset}
         onApplyTTRepeatPattern={handleApplyTTRepeatPattern}
       />

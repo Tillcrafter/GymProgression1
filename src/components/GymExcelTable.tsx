@@ -1,16 +1,25 @@
-import React from "react";
-import { DayPlan, GymTableRow } from "../types";
-import { Plus, Trash2, Dumbbell, HelpCircle, Activity } from "lucide-react";
+import { DayPlan, GymTableRow, WorkoutPresetType } from "../types";
+import { Plus, Trash2, Dumbbell, HelpCircle, Activity, Sparkles, Settings } from "lucide-react";
 
 interface GymExcelTableProps {
   currentDay: DayPlan;
   onUpdateDay: (updatedDay: DayPlan) => void;
   onSwitchTab?: (tab: "cardio") => void;
+  onApplyPreset?: (dayId: string, preset: WorkoutPresetType) => void;
+  onOpenSettings?: () => void;
 }
 
-export default function GymExcelTable({ currentDay, onUpdateDay, onSwitchTab }: GymExcelTableProps) {
+export default function GymExcelTable({ 
+  currentDay, 
+  onUpdateDay, 
+  onSwitchTab,
+  onApplyPreset,
+  onOpenSettings
+}: GymExcelTableProps) {
   const rows = currentDay.gymRows || [];
-  const isRestDay = currentDay.focusTitle?.toUpperCase().includes("REST") || currentDay.focusTitle?.toUpperCase().includes("PAUSE");
+  const focusUpper = (currentDay.focusTitle || "").toUpperCase();
+  const isRestDay = focusUpper.includes("REST") || focusUpper.includes("PAUSE") || focusUpper.includes("ERHOLUNG");
+  const isOpenDay = focusUpper.includes("NOCH KEIN TRAINING") || focusUpper.includes("OFFEN") || focusUpper.trim() === "";
 
   const updateRow = (id: string, field: keyof GymTableRow, value: string) => {
     const updated = rows.map((r) => (r.id === id ? { ...r, [field]: value } : r));
@@ -52,7 +61,7 @@ export default function GymExcelTable({ currentDay, onUpdateDay, onSwitchTab }: 
                 Tabelle 1
               </span>
               <span className="text-zinc-500 text-xs">•</span>
-              <span className="text-xs text-zinc-400 font-medium">Trainingsplan</span>
+              <span className="text-xs text-zinc-400 font-medium">Trainingsplan ({currentDay.name})</span>
             </div>
             <h2 className="text-base sm:text-lg font-black tracking-tight text-white uppercase flex items-center gap-2">
               GYM-TRAINING
@@ -75,8 +84,60 @@ export default function GymExcelTable({ currentDay, onUpdateDay, onSwitchTab }: 
         </div>
       </div>
 
+      {/* Open Day Banner (Noch kein Training festgelegt) */}
+      {isOpenDay && (
+        <div className="bg-gradient-to-r from-cyan-950/40 via-[#1a1a22] to-[#161619] border-b border-cyan-500/20 px-4 py-3 sm:px-6 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2.5 text-zinc-300">
+            <Sparkles className="w-4 h-4 text-cyan-400 shrink-0" />
+            <div>
+              <span className="font-bold text-white">Noch kein Training für {currentDay.name} festgelegt:</span>
+              <span className="text-zinc-400 hidden sm:inline ml-2">
+                Wähle ein vorgefertigtes Workout oder trage eigene Übungen ein.
+              </span>
+            </div>
+          </div>
+          {onApplyPreset && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                onClick={() => onApplyPreset(currentDay.id, "brust_ruecken")}
+                className="px-2.5 py-1 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 border border-cyan-500/30 font-bold transition-all cursor-pointer text-xs"
+              >
+                🏋️ Brust / Rücken
+              </button>
+              <button
+                onClick={() => onApplyPreset(currentDay.id, "arme_schultern")}
+                className="px-2.5 py-1 rounded-lg bg-blue-500/15 hover:bg-blue-500/25 text-blue-300 border border-blue-500/30 font-bold transition-all cursor-pointer text-xs"
+              >
+                🏋️ Arme / Schultern
+              </button>
+              <button
+                onClick={() => onApplyPreset(currentDay.id, "rest_run")}
+                className="px-2.5 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 font-bold transition-all cursor-pointer text-xs"
+              >
+                🏃 Restday: Laufen
+              </button>
+              <button
+                onClick={() => onApplyPreset(currentDay.id, "krank_pause")}
+                className="px-2.5 py-1 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 font-bold transition-all cursor-pointer text-xs"
+              >
+                🛌 Pause
+              </button>
+              {onOpenSettings && (
+                <button
+                  onClick={onOpenSettings}
+                  className="px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-300 border border-white/10 font-bold transition-all cursor-pointer text-xs flex items-center gap-1"
+                >
+                  <Settings className="w-3 h-3 text-zinc-400" />
+                  <span>Plan</span>
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Restday Banner */}
-      {isRestDay && (
+      {!isOpenDay && isRestDay && (
         <div className="bg-amber-500/10 border-b border-amber-500/20 px-4 py-2.5 sm:px-6 flex items-center justify-between gap-3 text-xs">
           <div className="flex items-center gap-2.5 text-amber-300">
             <Activity className="w-4 h-4 text-amber-400" />

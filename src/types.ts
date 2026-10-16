@@ -64,3 +64,11 @@ export interface WeekPlan {
   days: DayPlan[];
   weightRows?: WeightRow[];
 }
+
+export type WorkoutPresetType = "offen" | "brust_ruecken" | "arme_schultern" | "rest_run" | "krank_pause" | "custom";
+
+// Legacy type compatibility aliases
+export type WeekData = any;
+export type DayData = any;
+export type ExerciseData = any;
+export type SetData = any;
