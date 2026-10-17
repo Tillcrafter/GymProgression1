@@ -28,6 +28,7 @@ interface SettingsModalProps {
   onClearWeekTrainings: () => void;
   onResetEntirePlan: () => void;
   onApplyTTRepeatPattern: () => void;
+  onOpenPlanManager?: () => void;
 }
 
 export const WORKOUT_PRESETS: {
@@ -111,6 +112,7 @@ export function SettingsModal({
   onClearWeekTrainings,
   onResetEntirePlan,
   onApplyTTRepeatPattern,
+  onOpenPlanManager,
 }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<"days" | "split" | "general">("days");
   const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
@@ -335,6 +337,30 @@ export function SettingsModal({
 
           {activeTab === "split" && (
             <div className="space-y-4">
+              {/* Neuer Trainingsplan Creator Button Card */}
+              {onOpenPlanManager && (
+                <div className="p-4 rounded-xl bg-purple-500/10 border border-purple-500/30 text-xs text-zinc-300 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
+                  <div>
+                    <div className="font-bold text-white mb-0.5 flex items-center gap-1.5 text-sm">
+                      <Dumbbell className="w-4 h-4 text-purple-400" />
+                      <span>Neuen Trainingsplan erstellen / Vorlagen</span>
+                    </div>
+                    <div className="text-zinc-400 text-[11px]">
+                      Wähle aus Push/Pull/Beine, Oberkörper/Unterkörper oder erstelle einen völlig individuellen Split von Grund auf.
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      onClose();
+                      onOpenPlanManager();
+                    }}
+                    className="px-4 py-2 rounded-xl bg-purple-500 hover:bg-purple-400 text-black font-black text-xs transition-all cursor-pointer whitespace-nowrap shadow shrink-0"
+                  >
+                    Plan-Manager öffnen
+                  </button>
+                </div>
+              )}
+
               <div className="p-4 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-xs text-zinc-300">
                 <div className="font-bold text-white mb-1 flex items-center gap-1.5 text-sm">
                   <Sparkles className="w-4 h-4 text-cyan-400" />

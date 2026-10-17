@@ -1,6 +1,6 @@
 import React from "react";
-import { DayPlan, CardioTableRow } from "../types";
-import { Plus, Trash2, Activity } from "lucide-react";
+import { DayPlan, CardioTableRow, parseGermanOrEnglishNumber } from "../types";
+import { Plus, Trash2, Activity, Flame } from "lucide-react";
 
 interface CardioExcelTableProps {
   currentDay: DayPlan;
@@ -32,16 +32,11 @@ export default function CardioExcelTable({ currentDay, onUpdateDay }: CardioExce
     onUpdateDay({ ...currentDay, cardioRows: rows.filter((r) => r.id !== id) });
   };
 
-  // Summaries
+  // Safe German/English Summaries
   const totalEntries = rows.length;
-  const totalMinutes = rows.reduce((acc, r) => {
-    const match = r.duration.match(/\d+/);
-    return acc + (match ? parseInt(match[0], 10) : 0);
-  }, 0);
-  const totalKcal = rows.reduce((acc, r) => {
-    const match = r.calories.match(/\d+/);
-    return acc + (match ? parseInt(match[0], 10) : 0);
-  }, 0);
+  const totalMinutes = rows.reduce((acc, r) => acc + parseGermanOrEnglishNumber(r.duration), 0);
+  const totalKcal = Math.round(rows.reduce((acc, r) => acc + parseGermanOrEnglishNumber(r.calories), 0));
+  const totalSteps = Math.round(rows.reduce((acc, r) => acc + parseGermanOrEnglishNumber(r.steps), 0));
 
   return (
     <div className="flex flex-col h-full bg-[#161619] border border-white/10 rounded-2xl overflow-hidden shadow-2xl">

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { WeekPlan, DayPlan } from "./types";
+import { WeekPlan, DayPlan, parseGermanOrEnglishNumber, SavedWorkout, GymTableRow } from "./types";
 import { 
   getInitialWeek, 
   createNewWeekPlan, 
@@ -18,6 +18,8 @@ import CardioExcelTable from "./components/CardioExcelTable";
 import NutritionExcelTable from "./components/NutritionExcelTable";
 import WeightExcelTable from "./components/WeightExcelTable";
 import { SettingsModal, WorkoutPresetType } from "./components/SettingsModal";
+import { WeekHubModal } from "./components/WeekHubModal";
+import { WorkoutPlanManagerModal } from "./components/WorkoutPlanManagerModal";
 import { 
   Cloud, 
   Loader2, 
@@ -36,9 +38,10 @@ import {
   AlertTriangle,
   RefreshCw,
   Download,
-  Settings
+  Settings,
+  ChevronDown
 } from "lucide-react";
-import { collection, getDocs, setDoc, doc } from "firebase/firestore";
+import { collection, getDocs, setDoc, doc, deleteDoc } from "firebase/firestore";
 import { db } from "./lib/firebase";
 
 export default function App() {
@@ -56,6 +59,8 @@ export default function App() {
   const [syncErrorMessage, setSyncErrorMessage] = useState<string>("");
   const [showSyncModal, setShowSyncModal] = useState<boolean>(false);
   const [showSettingsModal, setShowSettingsModal] = useState<boolean>(false);
+  const [showWeekHubModal, setShowWeekHubModal] = useState<boolean>(false);
+  const [showPlanManagerModal, setShowPlanManagerModal] = useState<boolean>(false);
 
   const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -203,6 +208,72 @@ export default function App() {
     const updated: WeekPlan = { ...currentWeek, phase: phaseVal };
     setWeeks((prev) => prev.map((w) => (w.id === updated.id ? updated : w)));
     triggerCloudSave(updated);
+  };
+
+  // Rename a week
+  const handleRenameWeek = (weekId: string, newName: string) => {
+    const updatedWeeks = weeks.map((w) => (w.id === weekId ? { ...w, name: newName } : w));
+    setWeeks(updatedWeeks);
+    const target = updatedWeeks.find((w) => w.id === weekId);
+    if (target) {
+      triggerCloudSave(target);
+    }
+  };
+
+  // Delete a week
+  const handleDeleteWeek = async (weekId: string) => {
+    if (weeks.length <= 1) return;
+    const remainingWeeks = weeks.filter((w) => w.id !== weekId);
+    setWeeks(remainingWeeks);
+
+    if (selectedWeekId === weekId) {
+      setSelectedWeekId(remainingWeeks[0].id);
+      setActiveDayId(todayDayId);
+    }
+
+    localStorage.setItem("fittracker_excel_plans_v5", JSON.stringify(remainingWeeks));
+
+    try {
+      await deleteDoc(doc(db, "weeks", weekId));
+    } catch (e) {
+      console.warn("Error deleting week from Firestore:", e);
+    }
+  };
+
+  // Apply a newly created or preset workout plan to the current week
+  const handleApplyPlanToWeek = (newDays: DayPlan[], planName: string) => {
+    if (!currentWeek) return;
+    const updatedWeek: WeekPlan = {
+      ...currentWeek,
+      days: newDays,
+    };
+    setWeeks((prev) => prev.map((w) => (w.id === updatedWeek.id ? updatedWeek : w)));
+    triggerCloudSave(updatedWeek);
+  };
+
+  // Apply a single saved workout routine to a specific day
+  const handleApplyWorkoutToDay = (dayId: string, workout: SavedWorkout) => {
+    if (!currentWeek) return;
+    const updatedDays = currentWeek.days.map((d) => {
+      if (d.id !== dayId) return d;
+      const newGymRows: GymTableRow[] = workout.exercises.map((ex, i) => ({
+        id: `g_${dayId}_${i}_${Date.now()}`,
+        name: ex.name,
+        setsAndWeight: ex.setsAndWeight,
+        notes: ex.notes || "",
+      }));
+      return {
+        ...d,
+        focusTitle: workout.focusTitle || workout.name,
+        gymRows: newGymRows,
+      };
+    });
+    const updatedWeek: WeekPlan = {
+      ...currentWeek,
+      days: updatedDays,
+    };
+    setWeeks((prev) => prev.map((w) => (w.id === updatedWeek.id ? updatedWeek : w)));
+    triggerCloudSave(updatedWeek);
   };
 
   // Manual trigger to re-save immediately
@@ -370,14 +441,7 @@ export default function App() {
 
   // Compute weekly weight average for badge in tab (supports comma numbers)
   const validWeights = (currentWeek?.weightRows || [])
-    .map((r) => {
-      if (typeof r.weight === "number") return r.weight;
-      if (typeof r.weight === "string" && r.weight.trim() !== "") {
-        const p = parseFloat(r.weight.replace(",", "."));
-        return isNaN(p) ? NaN : p;
-      }
-      return NaN;
-    })
+    .map((r) => parseGermanOrEnglishNumber(r.weight))
     .filter((w) => !isNaN(w) && w > 0);
   const weeklyAvgStr =
     validWeights.length > 0
@@ -387,7 +451,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#111113] text-white flex flex-col font-sans antialiased selection:bg-cyan-500 selection:text-black">
       
-      {/* 1. Slim Clean Header with Logo, Day/Week Title & Settings Button */}
+      {/* 1. Slim Clean Header with Logo, Week/Phase & Settings Button */}
       <header className="w-full px-4 sm:px-8 py-2.5 border-b border-white/10 bg-[#151518]/95 backdrop-blur-md sticky top-0 z-40 shadow-sm">
         <div className="max-w-[1720px] mx-auto flex items-center justify-between gap-3">
           
@@ -406,32 +470,42 @@ export default function App() {
             </div>
           </div>
 
-          {/* Center Info: Selected Day & Focus */}
-          <div className="hidden md:flex items-center gap-2 text-xs">
-            <span className="text-zinc-400 font-medium">Ausgewählt:</span>
-            <span className="text-white font-bold">{currentDay?.name}</span>
-            <span className="text-zinc-500 font-mono text-[11px]">({currentDay?.date})</span>
-            {currentDay?.id === todayDayId && (
-              <span className="text-[10px] px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/30">
-                Heute
-              </span>
-            )}
+          {/* Center Info: Week & Current Context */}
+          <div className="hidden sm:flex items-center gap-2 text-xs">
+            <button
+              onClick={() => setShowWeekHubModal(true)}
+              title="Wochen-Hub öffnen: Übersicht, Übungs-Steigerung & Gewichtsverlauf"
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/5 hover:bg-cyan-500/10 border border-white/10 hover:border-cyan-500/30 font-bold text-cyan-300 transition-all cursor-pointer group"
+            >
+              <Calendar className="w-3.5 h-3.5 text-cyan-400 group-hover:scale-110 transition-transform" />
+              <span>{currentWeek?.name || "Woche 1"}</span>
+              <ChevronDown className="w-3 h-3 text-zinc-500 group-hover:text-cyan-300" />
+            </button>
             <span className="text-zinc-600">•</span>
-            <span className={`font-semibold px-2 py-0.5 rounded-md text-[11px] ${
-              currentDay?.focusTitle?.toUpperCase().includes("REST")
-                ? "bg-amber-500/15 text-amber-300 border border-amber-500/25"
-                : currentDay?.focusTitle?.toUpperCase().includes("KRANK")
-                  ? "bg-rose-500/15 text-rose-300 border border-rose-500/25"
-                  : currentDay?.focusTitle?.toUpperCase().includes("OFFEN") || currentDay?.focusTitle?.toUpperCase().includes("NOCH KEIN")
-                    ? "bg-zinc-800 text-zinc-300 border border-zinc-700"
-                    : "bg-cyan-500/15 text-cyan-300 border border-cyan-500/25"
-            }`}>
-              {currentDay?.focusTitle}
+            <span className="px-2 py-0.5 rounded-md bg-purple-500/10 border border-purple-500/20 text-purple-300 font-semibold text-[11px]">
+              Phase: {currentWeek?.phase || "AUFBAU"}
             </span>
+            {currentDay?.id === todayDayId && (
+              <>
+                <span className="text-zinc-600">•</span>
+                <span className="text-[10px] px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/30">
+                  Heute: {currentDay?.name}
+                </span>
+              </>
+            )}
           </div>
 
-          {/* Right Header: Settings Zahnrad Button */}
+          {/* Right Header: Plan Manager & Settings Buttons */}
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowPlanManagerModal(true)}
+              title="Neuen Trainingsplan erstellen oder Vorlage (PPL, OK/UK, TT-Repeat) wählen"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 text-purple-300 hover:text-white border border-purple-500/30 text-xs font-bold transition-all cursor-pointer shadow-sm group"
+            >
+              <Dumbbell className="w-4 h-4 text-purple-400 group-hover:scale-110 transition-transform" />
+              <span className="hidden sm:inline">Neuer Trainingsplan</span>
+            </button>
+
             <button
               onClick={() => setShowSettingsModal(true)}
               title="Einstellungen & Trainingstage (z.B. bei Krankheit oder Verschiebungen)"
@@ -455,11 +529,13 @@ export default function App() {
               const dateStr = day.date || weekDates[day.id] || "";
               const isRest = day.focusTitle?.toUpperCase().includes("REST");
               const isKrank = day.focusTitle?.toUpperCase().includes("KRANK");
+              const isOpen = day.focusTitle?.toUpperCase().includes("OFFEN") || day.focusTitle?.toUpperCase().includes("NOCH KEIN") || !day.focusTitle;
 
               // Short workout label
               let shortWorkout = day.focusTitle.replace(" (TRAINING 1)", "").replace(" (TRAINING 2)", "");
               if (isRest) shortWorkout = "Laufen";
               if (isKrank) shortWorkout = "Pause";
+              if (isOpen) shortWorkout = "Offen";
 
               return (
                 <button
@@ -500,7 +576,9 @@ export default function App() {
                         ? "text-amber-400"
                         : isKrank
                           ? "text-rose-400"
-                          : "text-zinc-400 group-hover:text-cyan-300"
+                          : isOpen
+                            ? "text-zinc-500"
+                            : "text-zinc-400 group-hover:text-cyan-300"
                   }`}>
                     {shortWorkout}
                   </div>
@@ -508,33 +586,9 @@ export default function App() {
               );
             })}
           </div>
-
-          {/* Clean selected day indicator */}
-          <div className="mt-1.5 pt-1.5 border-t border-white/5 flex items-center justify-between text-xs text-zinc-400">
-            <div className="flex items-center gap-2">
-              <span className="text-white font-bold">{currentDay?.name}</span>
-              <span className="text-zinc-500 font-mono text-[11px]">({currentDay?.date || weekDates[currentDay?.id || ""]})</span>
-              <span className="text-zinc-600">•</span>
-              <span className={`font-semibold px-2 py-0.5 rounded-md text-[11px] ${
-                currentDay?.focusTitle?.includes("REST")
-                  ? "bg-amber-500/15 text-amber-300 border border-amber-500/25"
-                  : currentDay?.focusTitle?.includes("KRANK")
-                    ? "bg-rose-500/15 text-rose-300 border border-rose-500/25"
-                    : "bg-cyan-500/15 text-cyan-300 border border-cyan-500/25"
-              }`}>
-                {currentDay?.focusTitle}
-              </span>
-            </div>
-            <div className="hidden sm:flex items-center gap-3 text-[11px] font-mono text-zinc-400">
-              <span>Gym: <strong className="text-white">{currentDay?.gymRows?.length || 0}</strong></span>
-              <span>•</span>
-              <span>Cardio: <strong className="text-white">{currentDay?.cardioRows?.length || 0}</strong></span>
-              <span>•</span>
-              <span>Mahlzeiten: <strong className="text-white">{currentDay?.nutritionRows?.length || 0}</strong></span>
-            </div>
-          </div>
         </div>
       </div>
+
 
       {/* 3. Excel Spreadsheet Tab Navigation (4 Tabs) */}
       <div className="w-full bg-[#131316] border-b border-white/5 px-4 sm:px-8 py-2">
@@ -643,6 +697,7 @@ export default function App() {
                   onSwitchTab={(tab) => setActiveTab(tab)}
                   onApplyPreset={handleUpdateDayTraining}
                   onOpenSettings={() => setShowSettingsModal(true)}
+                  onOpenPlanManager={() => setShowPlanManagerModal(true)}
                 />
               </div>
             )}
@@ -674,6 +729,7 @@ export default function App() {
                   onSwitchTab={(tab) => setActiveTab(tab)}
                   onApplyPreset={handleUpdateDayTraining}
                   onOpenSettings={() => setShowSettingsModal(true)}
+                  onOpenPlanManager={() => setShowPlanManagerModal(true)}
                 />
                 <WeightExcelTable currentWeek={currentWeek} onUpdateWeek={handleUpdateWeek} />
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
@@ -690,38 +746,38 @@ export default function App() {
       <footer className="w-full bg-[#141417] border-t border-white/10 px-4 sm:px-8 py-3 mt-auto shadow-2xl">
         <div className="max-w-[1720px] mx-auto flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
           
-          {/* Left: Wochenauswahl, Neue Woche & Phase */}
+          {/* Left: Wochen-Menü Button (öffnet Übersicht mit Steigerungen & Gewichtsverlauf) & Phase */}
           <div className="flex items-center flex-wrap gap-2.5">
-            {/* Week Selector Dropdown */}
-            <div className="flex items-center bg-[#1d1d23] border border-white/10 rounded-xl px-2.5 py-1 gap-1.5">
-              <span className="text-zinc-500 text-[11px] font-bold uppercase">Woche:</span>
-              <select
-                value={selectedWeekId}
-                onChange={(e) => {
-                  setSelectedWeekId(e.target.value);
-                  setActiveDayId(todayDayId);
-                }}
-                className="bg-transparent text-xs font-black text-cyan-300 focus:outline-none cursor-pointer tracking-wide"
+            {/* Week Hub Trigger Button */}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowWeekHubModal(true)}
+                title="Wochen-Menü öffnen: Übersicht aller Wochen, Übungs-Steigerungen & Gewichtsverlauf"
+                className="flex items-center gap-2 bg-[#1d1d23] hover:bg-[#272730] border border-cyan-500/30 hover:border-cyan-400/60 rounded-xl px-3 py-1.5 text-xs font-black text-cyan-300 transition-all cursor-pointer shadow-sm group"
               >
-                {weeks.map((w) => (
-                  <option key={w.id} value={w.id} className="bg-[#1a1a1f] text-white font-medium">
-                    {w.name} ({w.phase || "Aufbau"})
-                  </option>
-                ))}
-              </select>
+                <Calendar className="w-3.5 h-3.5 text-cyan-400 group-hover:scale-110 transition-transform" />
+                <span className="text-zinc-500 text-[11px] font-bold uppercase">Woche:</span>
+                <span className="text-white font-extrabold group-hover:text-cyan-300">
+                  {currentWeek?.name || "Woche 1"}
+                </span>
+                <span className="text-purple-300 text-[10px] font-mono px-1.5 py-0.2 rounded bg-purple-500/20">
+                  {currentWeek?.phase || "AUFBAU"}
+                </span>
+                <ChevronDown className="w-3.5 h-3.5 text-cyan-400 group-hover:translate-y-0.5 transition-transform" />
+              </button>
 
               <button
                 onClick={handleAddWeek}
                 title="Neue Woche hinzufügen (z.B. Woche 2)"
-                className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 text-[11px] font-bold transition-all cursor-pointer border border-cyan-500/20"
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 text-xs font-bold transition-all cursor-pointer border border-cyan-500/20"
               >
-                <Plus className="w-3 h-3" />
+                <Plus className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">+ Neue Woche</span>
               </button>
             </div>
 
             {/* Phase Tag */}
-            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-300 text-xs font-bold">
+            <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-300 text-xs font-bold">
               <span className="text-zinc-500 uppercase text-[10px]">Phase:</span>
               <input
                 type="text"
@@ -808,7 +864,37 @@ export default function App() {
         onClearWeekTrainings={handleClearWeekTrainings}
         onResetEntirePlan={handleReset}
         onApplyTTRepeatPattern={handleApplyTTRepeatPattern}
+        onOpenPlanManager={() => setShowPlanManagerModal(true)}
       />
+
+      {/* Week Hub Modal (Übersicht der Wochen, Übungs-Steigerungen & Gewichtsverlauf) */}
+      <WeekHubModal
+        isOpen={showWeekHubModal}
+        onClose={() => setShowWeekHubModal(false)}
+        weeks={weeks}
+        selectedWeekId={selectedWeekId}
+        onSelectWeek={(wId) => {
+          setSelectedWeekId(wId);
+          setActiveDayId(todayDayId);
+        }}
+        onAddWeek={handleAddWeek}
+        onRenameWeek={handleRenameWeek}
+        onDeleteWeek={handleDeleteWeek}
+        onUpdatePhase={handleUpdatePhase}
+        onOpenPlanManager={() => setShowPlanManagerModal(true)}
+      />
+
+      {/* Workout Plan Manager & Creator Modal (PPL, OK/UK, TT-Repeat oder gespeicherte Workouts) */}
+      {currentWeek && (
+        <WorkoutPlanManagerModal
+          isOpen={showPlanManagerModal}
+          onClose={() => setShowPlanManagerModal(false)}
+          currentWeek={currentWeek}
+          activeDayId={activeDayId}
+          onApplyPlanToWeek={handleApplyPlanToWeek}
+          onApplyWorkoutToDay={handleApplyWorkoutToDay}
+        />
+      )}
 
       {/* Cloud Sync Status & Help Modal */}
       {showSyncModal && (

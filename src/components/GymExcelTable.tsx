@@ -1,5 +1,7 @@
-import { DayPlan, GymTableRow, WorkoutPresetType } from "../types";
-import { Plus, Trash2, Dumbbell, HelpCircle, Activity, Sparkles, Settings } from "lucide-react";
+import React, { useState } from "react";
+import { DayPlan, GymTableRow, WorkoutPresetType, SavedWorkout } from "../types";
+import { Plus, Trash2, Dumbbell, HelpCircle, Activity, Sparkles, Settings, Save, Bookmark, Check } from "lucide-react";
+import { getSavedWorkouts, saveWorkoutsToStorage } from "../savedWorkoutsData";
 
 interface GymExcelTableProps {
   currentDay: DayPlan;
@@ -7,6 +9,7 @@ interface GymExcelTableProps {
   onSwitchTab?: (tab: "cardio") => void;
   onApplyPreset?: (dayId: string, preset: WorkoutPresetType) => void;
   onOpenSettings?: () => void;
+  onOpenPlanManager?: () => void;
 }
 
 export default function GymExcelTable({ 
@@ -14,8 +17,10 @@ export default function GymExcelTable({
   onUpdateDay, 
   onSwitchTab,
   onApplyPreset,
-  onOpenSettings
+  onOpenSettings,
+  onOpenPlanManager,
 }: GymExcelTableProps) {
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
   const rows = currentDay.gymRows || [];
   const focusUpper = (currentDay.focusTitle || "").toUpperCase();
   const isRestDay = focusUpper.includes("REST") || focusUpper.includes("PAUSE") || focusUpper.includes("ERHOLUNG");
@@ -44,11 +49,50 @@ export default function GymExcelTable({
     onUpdateDay({ ...currentDay, focusTitle: val });
   };
 
+  const showToast = (msg: string) => {
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg(null), 3000);
+  };
+
+  const handleSaveAsTemplate = () => {
+    const validRows = rows.filter((r) => r.name.trim().length > 0);
+    if (validRows.length === 0) {
+      showToast("Keine Übungen zum Speichern vorhanden.");
+      return;
+    }
+    const title = currentDay.focusTitle || `${currentDay.name} Workout`;
+    const newWorkout: SavedWorkout = {
+      id: `sw_custom_${Date.now()}`,
+      name: title,
+      focusTitle: title,
+      badge: "GESPEICHERT",
+      exercises: validRows.map((r, i) => ({
+        id: `sw_ex_${i}_${Date.now()}`,
+        name: r.name,
+        setsAndWeight: r.setsAndWeight || "3x8",
+        notes: r.notes || "",
+      })),
+      createdAt: new Date().toLocaleDateString("de-DE"),
+    };
+    const current = getSavedWorkouts();
+    const updated = [newWorkout, ...current];
+    saveWorkoutsToStorage(updated);
+    showToast(`✓ "${newWorkout.name}" als Vorlage gespeichert!`);
+  };
+
   // Calculate stats
   const totalExercises = rows.length;
 
   return (
-    <div className="flex flex-col h-full bg-[#161619] border border-white/10 rounded-2xl overflow-hidden shadow-2xl">
+    <div className="flex flex-col h-full bg-[#161619] border border-white/10 rounded-2xl overflow-hidden shadow-2xl relative">
+      {/* Toast Notification */}
+      {toastMsg && (
+        <div className="absolute top-4 right-4 z-50 bg-emerald-500 text-black px-4 py-2 rounded-xl font-bold text-xs shadow-2xl flex items-center gap-2 border border-emerald-400">
+          <Check className="w-4 h-4" />
+          <span>{toastMsg}</span>
+        </div>
+      )}
+
       {/* Table Header Bar */}
       <div className="p-4 sm:px-6 sm:py-4 bg-gradient-to-r from-[#1c1c21] to-[#161619] border-b border-white/10 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
@@ -268,17 +312,39 @@ export default function GymExcelTable({
 
       {/* Table Footer Action Bar */}
       <div className="p-3.5 sm:px-6 bg-[#141417] border-t border-white/10 flex flex-wrap items-center justify-between gap-3">
-        <button
-          onClick={addRow}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 hover:text-cyan-200 border border-cyan-500/30 text-xs font-bold transition-all cursor-pointer shadow-sm active:scale-95"
-        >
-          <Plus className="w-4 h-4" />
-          <span>+ Neue Übung hinzufügen</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={addRow}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 hover:text-cyan-200 border border-cyan-500/30 text-xs font-bold transition-all cursor-pointer shadow-sm active:scale-95"
+          >
+            <Plus className="w-4 h-4" />
+            <span>+ Neue Übung</span>
+          </button>
+
+          <button
+            onClick={handleSaveAsTemplate}
+            title="Speichert dieses Workout mit allen Übungen als wiederverwendbare Vorlage"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-purple-500/15 hover:bg-purple-500/25 text-purple-300 hover:text-purple-200 border border-purple-500/30 text-xs font-bold transition-all cursor-pointer shadow-sm"
+          >
+            <Save className="w-3.5 h-3.5 text-purple-400" />
+            <span>Als Vorlage speichern</span>
+          </button>
+
+          {onOpenPlanManager && (
+            <button
+              onClick={onOpenPlanManager}
+              title="Gespeicherte Workouts ansehen, anwenden oder verwalten"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white border border-white/10 text-xs font-bold transition-all cursor-pointer"
+            >
+              <Bookmark className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Vorlagen verwalten</span>
+            </button>
+          )}
+        </div>
 
         <div className="flex items-center gap-2 text-zinc-500 text-xs font-sans">
           <HelpCircle className="w-3.5 h-3.5 text-cyan-500/70" />
-          <span>Tipp: Trage deine Sätze direkt ein wie <code className="bg-black/30 px-1.5 py-0.5 rounded text-cyan-300 font-mono">35x7, 35x7, 35x6</code></span>
+          <span>Tipp: Trage Sätze direkt ein wie <code className="bg-black/30 px-1.5 py-0.5 rounded text-cyan-300 font-mono">35x7, 35x7, 35x6</code></span>
         </div>
       </div>
     </div>

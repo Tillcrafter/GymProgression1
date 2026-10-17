@@ -1,5 +1,5 @@
 import React from "react";
-import { WeekPlan, WeightRow } from "../types";
+import { WeekPlan, WeightRow, parseGermanOrEnglishNumber } from "../types";
 import { 
   Scale, 
   Plus, 
@@ -58,15 +58,9 @@ export default function WeightExcelTable({ currentWeek, onUpdateWeek }: WeightEx
 
   // Calculations for Weekly Average & Insights
   const validWeights = rows
-    .map((r) => {
-      if (typeof r.weight === "number") return r.weight;
-      if (typeof r.weight === "string" && r.weight.trim() !== "") {
-        const parsed = parseFloat(r.weight.replace(",", "."));
-        return isNaN(parsed) ? NaN : parsed;
-      }
-      return NaN;
-    })
+    .map((r) => parseGermanOrEnglishNumber(r.weight))
     .filter((w) => !isNaN(w) && w > 0);
+
 
   const loggedCount = validWeights.length;
   const totalDays = rows.length;

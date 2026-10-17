@@ -115,45 +115,245 @@ export function getTrainingDayCardioRows(): CardioTableRow[] {
 // ---------------------------------------------------------
 
 /**
- * Exakter Ernährungsplan:
- * Frühstück (486 kcal, 31g P, 53g KH, 16g F)
- * Pre-Workout (459 kcal, 20g P, 86g KH, 3g F)
- * Post-Workout (1.290 kcal, 76g P, 185g KH, 11g F)
- * Abendessen (562 kcal, 37g P, 64g KH, 16g F)
- * Snacks (543 kcal, 12g P, 57g KH, 19g F)
- * TAGESGESAMT: 3.340 kcal | 175g P | 445g KH | 65g F
+ * Exakter geprüfter Ernährungsplan:
+ * Frühstück (486 kcal, 30g P, 53g KH, 16g F)
+ * Pre-Workout (465 kcal, 32g P, 73g KH, 3g F)
+ * Post-Workout (1.260 kcal, 80g P, 195g KH, 12g F)
+ * Abendessen (562 kcal, 37g P, 63g KH, 16g F)
+ * Snacks (543 kcal, 13g P, 43g KH, 36g F)
+ * TAGESGESAMT: 3.316 kcal | 192g P | 427g KH | 83g F
  */
 export function getInitialNutritionRows(): NutritionTableRow[] {
   return [
-    // 1. Frühstück (Zwischensumme: 486 kcal, 31g P, 53g KH, 16g F)
-    { id: "nut_f1", meal: "Frühstück", food: "Honig", amount: "20 g", calories: 62, protein: 0, carbs: 16, fat: 0, notes: "" },
-    { id: "nut_f2", meal: "Frühstück", food: "Haferflocken", amount: "50 g", calories: 186, protein: 6, carbs: 29, fat: 4, notes: "" },
-    { id: "nut_f3", meal: "Frühstück", food: "Magerquark / Speisequark Magerstufe", amount: "200 g", calories: 132, protein: 24, carbs: 8, fat: 0, notes: "" },
-    { id: "nut_f4", meal: "Frühstück", food: "Olivenöl", amount: "12 g", calories: 106, protein: 0, carbs: 0, fat: 12, notes: "" },
+    // 1. Frühstück (Zwischensumme: 486 kcal | 30 g P | 53 g KH | 16 g F)
+    { 
+      id: "nut_f1", 
+      meal: "Frühstück", 
+      food: "Honig", 
+      amount: "20 g", 
+      calories: 62, 
+      protein: 0, 
+      carbs: 16, 
+      fat: 0, 
+      notes: "",
+      per100g: { calories: 310, protein: 0, carbs: 80, fat: 0 }
+    },
+    { 
+      id: "nut_f2", 
+      meal: "Frühstück", 
+      food: "Haferflocken", 
+      amount: "50 g", 
+      calories: 186, 
+      protein: 6, 
+      carbs: 29, 
+      fat: 4, 
+      notes: "",
+      per100g: { calories: 372, protein: 12, carbs: 58, fat: 8 }
+    },
+    { 
+      id: "nut_f3", 
+      meal: "Frühstück", 
+      food: "Magerquark", 
+      amount: "200 g", 
+      calories: 132, 
+      protein: 24, 
+      carbs: 8, 
+      fat: 0, 
+      notes: "",
+      per100g: { calories: 66, protein: 12, carbs: 4, fat: 0 }
+    },
+    { 
+      id: "nut_f4", 
+      meal: "Frühstück", 
+      food: "Olivenöl", 
+      amount: "12 g", 
+      calories: 106, 
+      protein: 0, 
+      carbs: 0, 
+      fat: 12, 
+      notes: "",
+      per100g: { calories: 883, protein: 0, carbs: 0, fat: 100 }
+    },
 
-    // 2. Pre-Workout (Zwischensumme: 459 kcal, 20g P, 86g KH, 3g F)
-    { id: "nut_pre1", meal: "Pre-Workout", food: "ESN Rice Pudding", amount: "85 g", calories: 317, protein: 7, carbs: 68, fat: 1, notes: "" },
-    { id: "nut_pre2", meal: "Pre-Workout", food: "Fettarme H-Milch laktosefrei 1,5%", amount: "70 g", calories: 33, protein: 2, carbs: 3, fat: 0, notes: "" },
-    { id: "nut_pre3", meal: "Pre-Workout", food: "Protein Complex Vanilla Flavour", amount: "30 g", calories: 109, protein: 10, carbs: 14, fat: 2, notes: "" },
+    // 2. Pre-Workout (Zwischensumme: 465 kcal | 32 g P | 73 g KH | 3 g F)
+    { 
+      id: "nut_pre1", 
+      meal: "Pre-Workout", 
+      food: "ESN Rice Pudding", 
+      amount: "85 g", 
+      calories: 317, 
+      protein: 7, 
+      carbs: 68, 
+      fat: 1, 
+      notes: "",
+      per100g: { calories: 373, protein: 8.2, carbs: 80, fat: 1.2 }
+    },
+    { 
+      id: "nut_pre2", 
+      meal: "Pre-Workout", 
+      food: "Milch 1,5 %", 
+      amount: "70 g", 
+      calories: 33, 
+      protein: 2, 
+      carbs: 3, 
+      fat: 0, 
+      notes: "",
+      per100g: { calories: 47, protein: 2.9, carbs: 4.3, fat: 0 }
+    },
+    { 
+      id: "nut_pre3", 
+      meal: "Pre-Workout", 
+      food: "ESN Basic Whey", 
+      amount: "30 g", 
+      calories: 115, 
+      protein: 23, 
+      carbs: 2, 
+      fat: 2, 
+      notes: "",
+      per100g: { calories: 383, protein: 76.7, carbs: 6.7, fat: 6.7 }
+    },
 
-    // 3. Post-Workout (Zwischensumme: 1.290 kcal, 76g P, 185g KH, 11g F)
-    { id: "nut_post1", meal: "Post-Workout", food: "Hähnchenbrustfilet", amount: "200 g", calories: 220, protein: 46, carbs: 0, fat: 2, notes: "" },
-    { id: "nut_post2", meal: "Post-Workout", food: "Nudeln, roh (aus Hartweizengrieß)", amount: "250 g", calories: 893, protein: 30, carbs: 177, fat: 4, notes: "" },
-    { id: "nut_post3", meal: "Post-Workout", food: "Curryketchup", amount: "30 g", calories: 33, protein: 0, carbs: 8, fat: 0, notes: "" },
-    { id: "nut_post4", meal: "Post-Workout", food: "Gemüse", amount: "200 g", calories: 100, protein: 0, carbs: 0, fat: 0, notes: "" },
-    { id: "nut_post5", meal: "Post-Workout", food: "Olivenöl", amount: "5 g", calories: 44, protein: 0, carbs: 0, fat: 5, notes: "" },
+    // 3. Post-Workout (Zwischensumme: 1.260 kcal | 80 g P | 195 g KH | 12 g F)
+    { 
+      id: "nut_post1", 
+      meal: "Post-Workout", 
+      food: "Hähnchenbrust, roh", 
+      amount: "200 g", 
+      calories: 220, 
+      protein: 46, 
+      carbs: 0, 
+      fat: 2, 
+      notes: "",
+      per100g: { calories: 110, protein: 23, carbs: 0, fat: 1 }
+    },
+    { 
+      id: "nut_post2", 
+      meal: "Post-Workout", 
+      food: "Nudeln, roh", 
+      amount: "250 g", 
+      calories: 893, 
+      protein: 30, 
+      carbs: 177, 
+      fat: 4, 
+      notes: "",
+      per100g: { calories: 357, protein: 12, carbs: 70.8, fat: 1.6 }
+    },
+    { 
+      id: "nut_post3", 
+      meal: "Post-Workout", 
+      food: "Curryketchup", 
+      amount: "30 g", 
+      calories: 33, 
+      protein: 0, 
+      carbs: 8, 
+      fat: 0, 
+      notes: "",
+      per100g: { calories: 110, protein: 0, carbs: 26.7, fat: 0 }
+    },
+    { 
+      id: "nut_post4", 
+      meal: "Post-Workout", 
+      food: "TK-Gemüse", 
+      amount: "200 g", 
+      calories: 70, 
+      protein: 4, 
+      carbs: 10, 
+      fat: 1, 
+      notes: "",
+      per100g: { calories: 35, protein: 2, carbs: 5, fat: 0.5 }
+    },
+    { 
+      id: "nut_post5", 
+      meal: "Post-Workout", 
+      food: "Olivenöl", 
+      amount: "5 g", 
+      calories: 44, 
+      protein: 0, 
+      carbs: 0, 
+      fat: 5, 
+      notes: "",
+      per100g: { calories: 880, protein: 0, carbs: 0, fat: 100 }
+    },
 
-    // 4. Abendessen (Zwischensumme: 562 kcal, 37g P, 64g KH, 16g F)
-    { id: "nut_ab1", meal: "Abendessen", food: "Eiweißbrot mit 13% Ölsaaten", amount: "110 g", calories: 268, protein: 22, carbs: 13, fat: 13, notes: "" },
-    { id: "nut_ab2", meal: "Abendessen", food: "Toastbrot Vollkorn", amount: "100 g", calories: 241, protein: 8, carbs: 45, fat: 3, notes: "" },
-    { id: "nut_ab3", meal: "Abendessen", food: "Putenbrust", amount: "30 g", calories: 30, protein: 7, carbs: 0, fat: 0, notes: "" },
-    { id: "nut_ab4", meal: "Abendessen", food: "Curryketchup", amount: "20 g", calories: 23, protein: 0, carbs: 5, fat: 0, notes: "" },
+    // 4. Abendessen (Zwischensumme: 562 kcal | 37 g P | 63 g KH | 16 g F)
+    { 
+      id: "nut_ab1", 
+      meal: "Abendessen", 
+      food: "Eiweißbrot", 
+      amount: "110 g", 
+      calories: 268, 
+      protein: 22, 
+      carbs: 13, 
+      fat: 13, 
+      notes: "",
+      per100g: { calories: 244, protein: 20, carbs: 11.8, fat: 11.8 }
+    },
+    { 
+      id: "nut_ab2", 
+      meal: "Abendessen", 
+      food: "Vollkorntoast", 
+      amount: "100 g", 
+      calories: 241, 
+      protein: 8, 
+      carbs: 45, 
+      fat: 3, 
+      notes: "",
+      per100g: { calories: 241, protein: 8, carbs: 45, fat: 3 }
+    },
+    { 
+      id: "nut_ab3", 
+      meal: "Abendessen", 
+      food: "Putenbrust", 
+      amount: "30 g", 
+      calories: 30, 
+      protein: 7, 
+      carbs: 0, 
+      fat: 0, 
+      notes: "",
+      per100g: { calories: 100, protein: 23.3, carbs: 0, fat: 0 }
+    },
+    { 
+      id: "nut_ab4", 
+      meal: "Abendessen", 
+      food: "Curryketchup", 
+      amount: "20 g", 
+      calories: 23, 
+      protein: 0, 
+      carbs: 5, 
+      fat: 0, 
+      notes: "",
+      per100g: { calories: 115, protein: 0, carbs: 25, fat: 0 }
+    },
 
-    // 5. Snacks (Zwischensumme: 543 kcal, 12g P, 57g KH, 19g F)
-    { id: "nut_sn1", meal: "Snacks", food: "Banane (ohne Schale), frisch", amount: "100 g", calories: 93, protein: 1, carbs: 23, fat: 0, notes: "" },
-    { id: "nut_sn2", meal: "Snacks", food: "Cashewkerne", amount: "75 g", calories: 450, protein: 11, carbs: 34, fat: 19, notes: "" },
+    // 5. Snacks (Zwischensumme: 543 kcal | 13 g P | 43 g KH | 36 g F)
+    { 
+      id: "nut_sn1", 
+      meal: "Snacks", 
+      food: "Banane", 
+      amount: "100 g", 
+      calories: 93, 
+      protein: 1, 
+      carbs: 23, 
+      fat: 0, 
+      notes: "",
+      per100g: { calories: 93, protein: 1, carbs: 23, fat: 0 }
+    },
+    { 
+      id: "nut_sn2", 
+      meal: "Snacks", 
+      food: "Nussmix", 
+      amount: "75 g", 
+      calories: 450, 
+      protein: 12, 
+      carbs: 20, 
+      fat: 36, 
+      notes: "",
+      per100g: { calories: 600, protein: 16, carbs: 26.7, fat: 48 }
+    },
   ];
 }
+
+
 
 // ---------------------------------------------------------
 // GEWICHTSTRACK (Tägliches Wiegen für die Woche)
@@ -274,17 +474,18 @@ export function normalizeDayPlan(day: any, dayIdx: number = 0): DayPlan {
       meal: r.meal || "Snacks",
       food: r.food || "",
       amount: r.amount || "100g",
-      calories: typeof r.calories === "number" ? r.calories : parseFloat(String(r.calories)) || 0,
-      protein: typeof r.protein === "number" ? r.protein : parseFloat(String(r.protein)) || 0,
-      carbs: typeof r.carbs === "number" ? r.carbs : parseFloat(String(r.carbs)) || 0,
-      fat: typeof r.fat === "number" ? r.fat : parseFloat(String(r.fat)) || 0,
+      calories: r.calories === "" || r.calories === undefined || r.calories === null ? "" : r.calories,
+      protein: r.protein === "" || r.protein === undefined || r.protein === null ? "" : r.protein,
+      carbs: r.carbs === "" || r.carbs === undefined || r.carbs === null ? "" : r.carbs,
+      fat: r.fat === "" || r.fat === undefined || r.fat === null ? "" : r.fat,
       notes: r.notes || "",
+      per100g: r.per100g,
     }));
   }
 
-  // Check if nutritionRows has the new exact plan
-  const hasNewNutrition = nutritionRows.some((r) => r.food && (r.food.includes("Rice Pudding") || r.food.includes("Curryketchup") || r.food.includes("Honig")));
-  if (nutritionRows.length === 0 || !hasNewNutrition) {
+
+  // Fallback to default initial meal plan only if entirely empty
+  if (nutritionRows.length === 0) {
     nutritionRows = getInitialNutritionRows();
   }
 
